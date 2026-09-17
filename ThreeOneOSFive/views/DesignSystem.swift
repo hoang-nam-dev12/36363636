@@ -538,7 +538,7 @@ struct DeveloperInfoCard: View {
                         .font(.system(size: 16, weight: .bold, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.55 + (0.40 * transparency)))
 
-                    Text("ADMIN • NHÓM TELEGRAM")
+                    Text("NHÓM TELEGRAM")
                         .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
                         .tracking(0.7)
                         .foregroundStyle(.white.opacity(0.22 + (0.58 * transparency)))
@@ -619,8 +619,7 @@ struct DeveloperInfoContent: View {
     }
 
     private let links: [DevLink] = [
-        DevLink(icon: "shield.lefthalf.filled", title: "Admin Telegram", subtitle: "t.me/hnmodios1", url: "https://t.me/hnmodios1"),
-        DevLink(icon: "paperplane.fill", title: "Nhóm Telegram", subtitle: "t.me/ffvison1", url: "https://t.me/ffvison1")
+        DevLink(icon: "paperplane.fill", title: "Nhóm Telegram", subtitle: "t.me/sbcblienquanmobile", url: "https://t.me/sbcblienquanmobile")
     ]
 
     var body: some View {

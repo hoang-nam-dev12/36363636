@@ -518,7 +518,7 @@ struct KeyActivationView: View {
                     Text("Kiểm tra License Key")
                         .font(.system(size: 19, weight: .bold))
                         .foregroundColor(primaryTextColor)
-                    Text("Nexus 3.0")
+                    Text("IHAX")
                         .font(.system(size: 12.5))
                         .foregroundColor(secondaryTextColor)
                 }

@@ -114,7 +114,7 @@ final class ModMenuViewController: UIViewController {
 
     private let titleLabel: UILabel = {
         let l = UILabel()
-        l.text = "Nexus 3.0"
+        l.text = "IHAX"
         l.font = UIFont.systemFont(ofSize: 17, weight: .bold)
         l.textColor = Palette.titlePrimary
         l.translatesAutoresizingMaskIntoConstraints = false

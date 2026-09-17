@@ -104,7 +104,7 @@ struct ThreeOneOSFiveApp: App {
 
     init() {
         setupLogCapture()
-        log("app: Nexus 3.0 launching — iOS \(AppInfo.osVersion) (\(AppInfo.osBuild)) \(AppInfo.machineName)")
+        log("app: IHAX launching — iOS \(AppInfo.osVersion) (\(AppInfo.osBuild)) \(AppInfo.machineName)")
         // Restore the user's last music preference instead of forcing playback.
         if FluxCoreAudioPlayer.shared.shouldPlayOnLaunch {
             FluxCoreAudioPlayer.shared.play()
@@ -218,7 +218,7 @@ struct ThreeOneOSFiveApp: App {
 @MainActor
 final class StartupResourceLoader: ObservableObject {
     @Published private(set) var progress: Double = 0
-    @Published private(set) var status: String = "Đang khởi tạo Nexus 3.0..."
+    @Published private(set) var status: String = "Đang khởi tạo IHAX..."
     @Published private(set) var detail: String = "Kiểm tra cấu hình ứng dụng"
     @Published private(set) var canSkipFailedPatch = false
     private var started = false
@@ -242,7 +242,7 @@ final class StartupResourceLoader: ObservableObject {
         // Patch manifest/download/import is deferred until the Patch tab is opened.
         setProgress(
             0.02,
-            status: "Đang khởi tạo Nexus 3.0...",
+            status: "Đang khởi tạo IHAX...",
             detail: "Chuẩn bị bộ nhớ tạm và core engine"
         )
 
@@ -424,7 +424,7 @@ struct StartupLoadingView: View {
 
     // Per-phase checklist shown in the card (REQ 2)
     private let phases: [(phase: StartupPhase, label: String, icon: String)] = [
-        (.initialize, "Khởi tạo engine Nexus 3.0",  "cpu.fill"),
+        (.initialize, "Khởi tạo engine IHAX",  "cpu.fill"),
         (.assets,     "Tải giao diện & video cần thiết", "photo.stack.fill"),
         (.patches,    "Đồng bộ Patch cần thiết",          "arrow.down.circle.fill"),
         (.finalize,   "Hoàn tất môi trường ứng dụng", "checkmark.shield.fill"),
@@ -439,7 +439,7 @@ struct StartupLoadingView: View {
             VStack(spacing: 0) {
                 VStack(spacing: 20) {
 
-                    // ── Nexus 3.0 spinner + percent ──────────────────────
+                    // ── IHAX spinner + percent ──────────────────────
                     VStack(spacing: 6) {
                         ZStack {
                             Circle()
@@ -462,7 +462,7 @@ struct StartupLoadingView: View {
                                 .fill(AppTheme.accent)
                                 .frame(width: 6, height: 6)
                                 .shadow(color: AppTheme.accent.opacity(0.90), radius: 5)
-                            Text("NEXUS 3.0 INITIALIZING")
+                            Text("IHAX INITIALIZING")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                                 .tracking(1.5)
                                 .foregroundStyle(AppTheme.accent)
@@ -521,7 +521,7 @@ struct StartupLoadingView: View {
                         }
                         .frame(height: 7)
                         HStack {
-                            Text("Nexus 3.0")
+                            Text("IHAX")
                             Spacer()
                             Text("\(percent)%")
                         }
@@ -582,7 +582,7 @@ struct StartupLoadingView: View {
         }
         .allowsHitTesting(loader.canSkipFailedPatch)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Đang tải tài nguyên Nexus 3.0")
+        .accessibilityLabel("Đang tải tài nguyên IHAX")
         .accessibilityValue("\(percent) phần trăm")
     }
 

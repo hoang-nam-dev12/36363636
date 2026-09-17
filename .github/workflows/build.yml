@@ -47,22 +47,22 @@ jobs:
         run: |
           mkdir -p Payload
           cp -r build/3105.xcarchive/Products/Applications/3105.app Payload/
-          zip -r Nexus_3.0.ipa Payload
+          zip -r IHAX.ipa Payload
           rm -rf Payload
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Nexus_3.0_IPA
-          path: Nexus_3.0.ipa
+          name: IHAX_IPA
+          path: IHAX.ipa
           retention-days: 30
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "Nexus 3.0"
-          tag_name: "v3.0-${{ github.run_number }}"
-          files: Nexus_3.0.ipa
+          name: "IHAX"
+          tag_name: "v1.0-${{ github.run_number }}"
+          files: IHAX.ipa
           draft: false
           prerelease: false
         env:

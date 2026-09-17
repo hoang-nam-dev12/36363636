@@ -40,7 +40,8 @@ jobs:
             -archivePath build/3105.xcarchive \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            OTHER_CFLAGS="-Wno-error=implicit-function-declaration -Wno-error=incompatible-pointer-types -Wno-error=return-type -Wno-implicit-function-declaration -Wno-incompatible-pointer-types -Wno-return-type -Wno-deprecated-declarations"
 
       - name: Package IPA
         run: |

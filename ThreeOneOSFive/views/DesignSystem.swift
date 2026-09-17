@@ -538,7 +538,7 @@ struct DeveloperInfoCard: View {
                         .font(.system(size: 16, weight: .bold, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.55 + (0.40 * transparency)))
 
-                    Text("DEV • CHANNEL • ZALO • TELEGRAM")
+                    Text("ADMIN • NHÓM TELEGRAM")
                         .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
                         .tracking(0.7)
                         .foregroundStyle(.white.opacity(0.22 + (0.58 * transparency)))
@@ -567,7 +567,12 @@ struct DeveloperInfoCard: View {
             }
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(Color.clear, lineWidth: 0)
+                    .stroke(
+                        borderWidth > 0 && borderOpacity > 0
+                            ? appearance.resolvedBorderColor.opacity(borderOpacity)
+                            : Color.clear,
+                        lineWidth: borderWidth
+                    )
             }
             .shadow(color: .black.opacity(0.22 * transparency), radius: 14 * transparency, y: 7 * transparency)
         }
@@ -614,10 +619,8 @@ struct DeveloperInfoContent: View {
     }
 
     private let links: [DevLink] = [
-        DevLink(icon: "paperplane.fill", title: "Channel Telegram", subtitle: "t.me/zhmodzxsite", url: "https://t.me/zhmodzxsite"),
-        DevLink(icon: "bubble.left.and.bubble.right.fill", title: "Box Zalo", subtitle: "zalo.me/g/5tlcychf...", url: "https://zalo.me/g/5tlcychf5tqz1nvsn5jf"),
-        DevLink(icon: "person.fill.badge.plus", title: "Admin Zalo", subtitle: "0927635682", url: "https://zaloapp.com/0927635682"),
-        DevLink(icon: "shield.lefthalf.filled", title: "Admin Telegram", subtitle: "t.me/zhmodzproxyvip", url: "https://t.me/zhmodzproxyvip")
+        DevLink(icon: "shield.lefthalf.filled", title: "Admin Telegram", subtitle: "t.me/hnmodios1", url: "https://t.me/hnmodios1"),
+        DevLink(icon: "paperplane.fill", title: "Nhóm Telegram", subtitle: "t.me/ffvison1", url: "https://t.me/ffvison1")
     ]
 
     var body: some View {

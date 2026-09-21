@@ -120,7 +120,7 @@ class KeyAuthManager: ObservableObject {
                     self.isAuthorized     = true
 
                     let deviceKey = api.getDeviceKey() ?? ""
-                    let expire    = api.getKeyExpire() ?? ""
+                    let expire    = api.getExpire() ?? ""
 
                     self.savedKey   = deviceKey
                     self.keyName    = "Duy Mạnh Store VIP"

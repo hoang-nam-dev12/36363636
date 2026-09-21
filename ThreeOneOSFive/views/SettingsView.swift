@@ -943,19 +943,19 @@ fileprivate final class WallpaperVideoPaletteSampler {
         generation &+= 1
         let activeGeneration = generation
 
-        // Sampling every video frame is unnecessary for an ambient palette and
-        // competes with SwiftUI/AVPlayer for GPU time on older iPhones.
-        let timer = Timer(timeInterval: 0.75, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.12, repeats: true) { [weak self] _ in
             self?.sample(generation: activeGeneration)
         }
-        timer.tolerance = 0.20
+        timer.tolerance = 0.04
         self.timer = timer
         RunLoop.main.add(timer, forMode: .common)
         sample(generation: activeGeneration)
     }
 
     func stop() {
-        suspend()
+        generation &+= 1
+        stopTimerOnly()
+        detachOutput()
 
         if Thread.isMainThread {
             palette.reset()
@@ -964,15 +964,6 @@ fileprivate final class WallpaperVideoPaletteSampler {
                 palette.reset()
             }
         }
-    }
-
-    /// Pause sampling without clearing the shared palette. Hidden SwiftUI tabs
-    /// may own their own player view, so clearing here would make the visible
-    /// tab flash back to the default colors.
-    func suspend() {
-        generation &+= 1
-        stopTimerOnly()
-        detachOutput()
     }
 
     private func stopTimerOnly() {
@@ -1158,7 +1149,6 @@ struct AnimeVideoBackground: UIViewRepresentable {
         var playerLooper: AVPlayerLooper?
         var playerLayer: AVPlayerLayer?
         fileprivate var paletteSampler: WallpaperVideoPaletteSampler?
-        private var playbackEnabled = false
         private let firstFrameView = UIImageView()
         private var readyObservation: NSKeyValueObservation?
 
@@ -1170,19 +1160,8 @@ struct AnimeVideoBackground: UIViewRepresentable {
             playerLayer?.frame = bounds
         }
 
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            updatePlaybackState()
-        }
-
         func startPlayback() {
-            updatePlaybackState()
-        }
-
-        func setPlaybackEnabled(_ enabled: Bool) {
-            guard playbackEnabled != enabled else { return }
-            playbackEnabled = enabled
-            updatePlaybackState()
+            player?.play()
         }
 
         func installFirstFrame(_ image: UIImage?) {
@@ -1224,18 +1203,6 @@ struct AnimeVideoBackground: UIViewRepresentable {
 
         func stopPlayback() {
             player?.pause()
-            paletteSampler?.suspend()
-        }
-
-        private func updatePlaybackState() {
-            let appIsVisible = UIApplication.shared.applicationState != .background
-            guard playbackEnabled, window != nil, !isHidden, appIsVisible else {
-                stopPlayback()
-                return
-            }
-            player?.play()
-            paletteSampler?.start()
-            hideFirstFrameAfterVideoReady()
         }
 
         func installLifecycleObservers() {
@@ -1248,6 +1215,7 @@ struct AnimeVideoBackground: UIViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 self?.startPlayback()
+                self?.paletteSampler?.start()
             }
 
             backgroundObserver = center.addObserver(
@@ -1256,6 +1224,7 @@ struct AnimeVideoBackground: UIViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 self?.stopPlayback()
+                self?.paletteSampler?.stop()
             }
         }
 
@@ -1288,16 +1257,10 @@ struct AnimeVideoBackground: UIViewRepresentable {
 
     let urlString: String
     let cacheKey: String
-    let playbackEnabled: Bool
 
-    init(
-        urlString: String,
-        cacheKey: String = "animeDynamic",
-        playbackEnabled: Bool = true
-    ) {
+    init(urlString: String, cacheKey: String = "animeDynamic") {
         self.urlString = urlString
         self.cacheKey = cacheKey
-        self.playbackEnabled = playbackEnabled
     }
 
     func makeUIView(context: Context) -> BGPlayerView {
@@ -1343,14 +1306,17 @@ struct AnimeVideoBackground: UIViewRepresentable {
         view.layer.insertSublayer(layer, at: 0)
         view.installLifecycleObservers()
 
-        // Playback begins once the view is attached to a visible window.
-        view.setPlaybackEnabled(playbackEnabled)
+        // Start exactly once. SwiftUI updateUIView only updates geometry.
+        player.play()
+        sampler.start()
+        view.hideFirstFrameAfterVideoReady()
         return view
     }
 
     func updateUIView(_ uiView: BGPlayerView, context: Context) {
         uiView.playerLayer?.frame = uiView.bounds
-        uiView.setPlaybackEnabled(playbackEnabled)
+        // Never pause, seek, or recreate the player here. SwiftUI state updates
+        // must not interrupt AVPlayerLooper frame delivery.
     }
 
     static func dismantleUIView(_ uiView: BGPlayerView, coordinator: ()) {
@@ -1432,95 +1398,79 @@ struct AnimeStaticBackground: View {
 /// The field is self-contained and has no network dependency.
 struct CosmicBackground: View {
     let isDark: Bool
-    @ObservedObject private var appearance = AppearanceSettings.shared
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var shouldAnimate: Bool {
-        appearance.animationsEnabled && !reduceMotion
-    }
 
     var body: some View {
         GeometryReader { geo in
-            Group {
-                if shouldAnimate {
-                    // 15 fps keeps the ambient motion smooth without forcing a
-                    // full-screen Canvas redraw at the display refresh rate.
-                    TimelineView(.periodic(from: .now, by: 1.0 / 15.0)) { timeline in
-                        cosmicField(
-                            size: geo.size,
-                            time: timeline.date.timeIntervalSinceReferenceDate
-                        )
-                    }
-                } else {
-                    cosmicField(size: geo.size, time: 0)
-                }
-            }
-        }
-        .ignoresSafeArea()
-    }
-
-    @ViewBuilder
-    private func cosmicField(size: CGSize, time t: TimeInterval) -> some View {
-        ZStack {
-            LinearGradient(
-                colors: isDark
-                    ? [Color(red: 0.003, green: 0.006, blue: 0.014),
-                       Color(red: 0.008, green: 0.022, blue: 0.055),
-                       Color(red: 0.002, green: 0.008, blue: 0.020)]
-                    : [Color(red: 0.96, green: 0.92, blue: 1.0),
-                       Color(red: 0.82, green: 0.70, blue: 0.98),
-                       Color(red: 0.93, green: 0.88, blue: 1.0)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            RadialGradient(
-                colors: [
-                    Color(red: 0.08, green: 0.52, blue: 1.0).opacity(isDark ? 0.34 : 0.24),
-                    Color.clear
-                ],
-                center: UnitPoint(
-                    x: 0.25 + 0.12 * sin(t * 0.22),
-                    y: 0.20 + 0.10 * cos(t * 0.18)
-                ),
-                startRadius: 0,
-                endRadius: max(size.width, size.height) * 0.72
-            )
-
-            RadialGradient(
-                colors: [
-                    Color(red: 0.04, green: 0.40, blue: 1.0).opacity(isDark ? 0.22 : 0.16),
-                    Color.clear
-                ],
-                center: UnitPoint(
-                    x: 0.82 + 0.10 * cos(t * 0.16),
-                    y: 0.76 + 0.08 * sin(t * 0.20)
-                ),
-                startRadius: 0,
-                endRadius: max(size.width, size.height) * 0.62
-            )
-
-            Canvas { context, canvasSize in
-                let count = 48
-                for i in 0..<count {
-                    let seed = Double(i * 7919 % 1000) / 1000.0
-                    let seed2 = Double(i * 3571 % 1000) / 1000.0
-                    let x = (seed + t * (0.004 + seed2 * 0.004)).truncatingRemainder(dividingBy: 1.0) * canvasSize.width
-                    let y = seed2 * canvasSize.height
-                    let pulse = 0.35 + 0.65 * abs(sin(t * (0.7 + seed) + seed2 * 8))
-                    let radius: CGFloat = CGFloat(0.7 + seed * 1.5)
-                    let rect = CGRect(x: x, y: y, width: radius, height: radius)
-                    context.fill(
-                        Path(ellipseIn: rect),
-                        with: .color(.white.opacity((isDark ? 0.42 : 0.28) * pulse))
+            TimelineView(.animation) { timeline in
+                let t = timeline.date.timeIntervalSinceReferenceDate
+                ZStack {
+                    LinearGradient(
+                        colors: isDark
+                            ? [Color(red: 0.003, green: 0.006, blue: 0.014),
+                               Color(red: 0.008, green: 0.022, blue: 0.055),
+                               Color(red: 0.002, green: 0.008, blue: 0.020)]
+                            : [Color(red: 0.96, green: 0.92, blue: 1.0),
+                               Color(red: 0.82, green: 0.70, blue: 0.98),
+                               Color(red: 0.93, green: 0.88, blue: 1.0)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
                     )
+                    .ignoresSafeArea()
+
+                    RadialGradient(
+                        colors: [
+                            Color(red: 0.08, green: 0.52, blue: 1.0).opacity(isDark ? 0.34 : 0.24),
+                            Color.clear
+                        ],
+                        center: UnitPoint(
+                            x: 0.25 + 0.12 * sin(t * 0.22),
+                            y: 0.20 + 0.10 * cos(t * 0.18)
+                        ),
+                        startRadius: 0,
+                        endRadius: max(geo.size.width, geo.size.height) * 0.72
+                    )
+                    .ignoresSafeArea()
+
+                    RadialGradient(
+                        colors: [
+                            Color(red: 0.04, green: 0.40, blue: 1.0).opacity(isDark ? 0.22 : 0.16),
+                            Color.clear
+                        ],
+                        center: UnitPoint(
+                            x: 0.82 + 0.10 * cos(t * 0.16),
+                            y: 0.76 + 0.08 * sin(t * 0.20)
+                        ),
+                        startRadius: 0,
+                        endRadius: max(geo.size.width, geo.size.height) * 0.62
+                    )
+                    .ignoresSafeArea()
+
+                    Canvas { context, size in
+                        let count = 90
+                        for i in 0..<count {
+                            let seed = Double(i * 7919 % 1000) / 1000.0
+                            let seed2 = Double(i * 3571 % 1000) / 1000.0
+                            let x = (seed + t * (0.004 + seed2 * 0.004)).truncatingRemainder(dividingBy: 1.0) * size.width
+                            let y = seed2 * size.height
+                            let pulse = 0.35 + 0.65 * abs(sin(t * (0.7 + seed) + seed2 * 8))
+                            let radius: CGFloat = CGFloat(0.7 + seed * 1.5)
+                            let rect = CGRect(x: x, y: y, width: radius, height: radius)
+                            context.fill(
+                                Path(ellipseIn: rect),
+                                with: .color(.white.opacity((isDark ? 0.42 : 0.28) * pulse))
+                            )
+                        }
+                    }
+                    .ignoresSafeArea()
+
+                    // Fine HUD grid, kept inside the visual field.
+                    GridBackgroundView(
+                        spacing: 32,
+                        lineColor: Color(red: 0.08, green: 0.52, blue: 1.0).opacity(isDark ? 0.060 : 0.075)
+                    )
+                    .ignoresSafeArea()
                 }
             }
-
-            GridBackgroundView(
-                spacing: 32,
-                lineColor: Color(red: 0.08, green: 0.52, blue: 1.0).opacity(isDark ? 0.060 : 0.075)
-            )
         }
         .ignoresSafeArea()
     }
@@ -1530,7 +1480,6 @@ struct CosmicBackground: View {
 struct GlobalBackground: View {
     @ObservedObject private var appearance = AppearanceSettings.shared
     @Environment(\.colorScheme) private var systemColorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isLightMode: Bool {
         appearance.backgroundMode == .light
@@ -1539,19 +1488,12 @@ struct GlobalBackground: View {
             || (appearance.colorSchemeMode == .system && systemColorScheme == .light)
     }
 
-    private var playbackEnabled: Bool {
-        appearance.animationsEnabled
-            && !reduceMotion
-            && !ProcessInfo.processInfo.isLowPowerModeEnabled
-    }
-
     var body: some View {
         ZStack {
             if isLightMode {
                 AnimeVideoBackground(
                     urlString: AppearanceSettings.BackgroundMode.lightSkyVideoURL,
-                    cacheKey: "lightSky",
-                    playbackEnabled: playbackEnabled
+                    cacheKey: "lightSky"
                 )
                 .ignoresSafeArea()
                 .transition(.opacity)
@@ -1560,8 +1502,7 @@ struct GlobalBackground: View {
                 case .light:
                     AnimeVideoBackground(
                         urlString: AppearanceSettings.BackgroundMode.lightSkyVideoURL,
-                        cacheKey: "lightSky",
-                        playbackEnabled: playbackEnabled
+                        cacheKey: "lightSky"
                     )
                     .ignoresSafeArea()
                     .transition(.opacity)
@@ -1573,8 +1514,7 @@ struct GlobalBackground: View {
                 case .animeDynamic:
                     AnimeVideoBackground(
                         urlString: AppearanceSettings.BackgroundMode.animeDynamicVideoURL,
-                        cacheKey: "animeDynamic",
-                        playbackEnabled: playbackEnabled
+                        cacheKey: "animeDynamic"
                     )
                     .ignoresSafeArea()
                     .transition(.opacity)

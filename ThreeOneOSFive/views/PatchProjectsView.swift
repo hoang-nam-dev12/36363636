@@ -76,20 +76,6 @@ private enum ServerPatchMetadataStore {
     }
 
     private static let storageKey = "PatchProjects.serverMetadata.v1"
-    private static let cacheKey = NSString(string: storageKey)
-
-    /// SwiftUI asks for the category of the same patch several times while it
-    /// lays out badges, tabs and cards. Keep the decoded records in memory so
-    /// those render passes do not repeatedly decode the UserDefaults payload.
-    private final class RecordCache: NSObject {
-        let records: [Record]
-
-        init(_ records: [Record]) {
-            self.records = records
-        }
-    }
-
-    private static let cache = NSCache<NSString, RecordCache>()
 
     static func replace(with files: [OnlineFileItem]) {
         let previous = Dictionary(uniqueKeysWithValues: load().map { ($0.serverID, $0) })
@@ -162,24 +148,15 @@ private enum ServerPatchMetadataStore {
     }
 
     private static func load() -> [Record] {
-        if let cached = cache.object(forKey: cacheKey) {
-            return cached.records
+        guard let data = UserDefaults.standard.data(forKey: storageKey),
+              let records = try? JSONDecoder().decode([Record].self, from: data) else {
+            return []
         }
-
-        let records: [Record]
-        if let data = UserDefaults.standard.data(forKey: storageKey),
-           let decoded = try? JSONDecoder().decode([Record].self, from: data) {
-            records = decoded
-        } else {
-            records = []
-        }
-        cache.setObject(RecordCache(records), forKey: cacheKey)
         return records
     }
 
     private static func save(_ records: [Record]) {
         guard let data = try? JSONEncoder().encode(records) else { return }
-        cache.setObject(RecordCache(records), forKey: cacheKey)
         UserDefaults.standard.set(data, forKey: storageKey)
     }
 

@@ -619,7 +619,9 @@ struct DeveloperInfoContent: View {
     }
 
     private let links: [DevLink] = [
-        DevLink(icon: "paperplane.fill", title: "Nhóm Telegram", subtitle: "t.me/sbcblienquanmobile", url: "https://t.me/sbcblienquanmobile")
+        DevLink(icon: "person.3.fill", title: "Nhóm Telegram", subtitle: "t.me/dmanhchat", url: "https://t.me/dmanhchat"),
+        DevLink(icon: "person.crop.circle.fill", title: "Admin Telegram", subtitle: "t.me/ndmprofile", url: "https://t.me/ndmprofile"),
+        DevLink(icon: "hammer.fill", title: "DEV", subtitle: "t.me/aieqt", url: "https://t.me/aieqt")
     ]
 
     var body: some View {

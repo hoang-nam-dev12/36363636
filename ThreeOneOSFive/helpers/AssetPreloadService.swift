@@ -29,7 +29,7 @@ actor AssetPreloadService {
             .init(key: "icon.lienquan", url: URL(string: "https://i.ibb.co/3mr8wR8m/IMG-8641.jpg")!, fileExtension: "jpg"),
             .init(key: "background.static", url: URL(string: AppearanceSettings.BackgroundMode.animeStaticVideoURL)!, fileExtension: "mov"),
             .init(key: "background.dynamic", url: URL(string: AppearanceSettings.BackgroundMode.animeDynamicVideoURL)!, fileExtension: "mp4"),
-            .init(key: "background.extra", url: URL(string: "https://www.image2url.com/r2/default/videos/1787437582108-3eb173b4-9b76-43ba-b274-dc6bb87eccb0.mp4")!, fileExtension: "mp4"),
+            .init(key: "home.cover", url: URL(string: "https://www.image2url.com/r2/default/files/1790007520502-b6c3841b-1960-41fc-9ee2-76d4c3d44358.jpg")!, fileExtension: "jpg"),
             .init(key: "audio.background", url: URL(string: "https://www.image2url.com/r2/default/audio/1787540835956-e0b3ebb8-d327-4e8e-8b4b-0f19c86a60d3.mp3")!, fileExtension: "mp3")
         ]
     }
@@ -176,7 +176,7 @@ actor AssetPreloadService {
             "icon.lienquan": "icon_lienquan.jpg",
             "background.static": "background_static.mov",
             "background.dynamic": "background_dynamic.mp4",
-            "background.extra": "background_extra.mp4",
+            "home.cover": "home_cover.jpg",
             "audio.background": "audio_background.mp3"
         ]
         guard let name = mapping[key] else { return nil }

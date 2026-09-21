@@ -1454,17 +1454,17 @@ struct PatchGuideModal: View {
     }
 }
 
-// MARK: - 8. VideoSection — exact required URL, autoplay loop muted
-struct VideoSection: View {
-    // REQ: exact URL, no modification
-    private let videoURL = "https://www.image2url.com/r2/default/videos/1787437582108-3eb173b4-9b76-43ba-b274-dc6bb87eccb0.mp4?utm_source=chatgpt.com"
+// MARK: - 8. Home cover image
+struct HomeCoverSection: View {
+    private let imageURL = URL(
+        string: "https://www.image2url.com/r2/default/files/1790007520502-b6c3841b-1960-41fc-9ee2-76d4c3d44358.jpg"
+    )!
     @State private var appear = false
+
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 20).fill(Color.black)
-            // LoopingVideoPlayer: autoplay, loop, muted, playsinline (native AVPlayer behaviour)
-            LoopingVideoPlayer(urlString: videoURL)
-                .clipShape(RoundedRectangle(cornerRadius: 20))
+            homeCover
             RoundedRectangle(cornerRadius: 20)
                 .stroke(Color.clear, lineWidth: 0)
         }
@@ -1473,6 +1473,33 @@ struct VideoSection: View {
         .scaleEffect(appear ? 1.0 : 0.96).opacity(appear ? 1.0 : 0)
         .onAppear {
             withAnimation(.spring(response: 0.55, dampingFraction: 0.80).delay(0.08)) { appear = true }
+        }
+    }
+
+    @ViewBuilder
+    private var homeCover: some View {
+        if let cachedURL = AssetPreloadService.cachedURL(key: "home.cover"),
+           let cachedImage = UIImage(contentsOfFile: cachedURL.path) {
+            Image(uiImage: cachedImage)
+                .resizable()
+                .scaledToFill()
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+        } else {
+            AsyncImage(url: imageURL) { phase in
+                if let image = phase.image {
+                    image
+                        .resizable()
+                        .scaledToFill()
+                } else if phase.error != nil {
+                    Image(systemName: "photo.fill")
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.55))
+                } else {
+                    ProgressView()
+                        .tint(.white)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 20))
         }
     }
 }
@@ -1815,7 +1842,7 @@ private struct DashboardView: View {
                     VStack(spacing: 18) {
 
                         // Video
-                        VideoSection()
+                        HomeCoverSection()
                             .padding(.horizontal, 20)
                             .opacity(card1Appear ? 1 : 0).offset(y: card1Appear ? 0 : 20)
 

@@ -16,7 +16,7 @@ final class FluxCoreAudioPlayer: ObservableObject {
 
     @Published private(set) var isPlaying: Bool = false
 
-    private let musicURL = URL(string: "https://www.image2url.com/r2/default/audio/1787540835956-e0b3ebb8-d327-4e8e-8b4b-0f19c86a60d3.mp3")!
+    private let musicURL = URL(string: "https://www.image2url.com/r2/default/files/1790007348399-b69ab7ff-1a62-4dca-98f6-91c724c62e20.mp3")!
 
     private var resolvedMusicURL: URL {
         AssetPreloadService.cachedURL(key: "audio.background") ?? musicURL

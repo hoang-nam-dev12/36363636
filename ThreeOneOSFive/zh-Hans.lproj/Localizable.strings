@@ -540,9 +540,13 @@
 
 "patch.info.mod.toggle" = "此开关用于启用或停用对应的 MOD 补丁。只有补丁操作成功完成后，界面状态才会更新。";
 
-"patch.info.holo.toggle" = "此开关用于启用或停用对应的 HOLO 补丁。只有补丁操作成功完成后，界面状态才会更新。";
+"patch.info.holo.toggle" = "此开关用于启用或停用对应的显示 / ESP 补丁。只有补丁操作成功完成后，界面状态才会更新。";
 
-"patch.info.holo.description" = "HOLO 分组显示归类为 HOLO 的补丁。选择此分组即可查看和管理应用中的 HOLO 补丁。";
+"patch.info.holo.description" = "显示 / ESP 分组包含网站上选择为显示 / ESP 的补丁。";
+"patch.info.utility.description" = "工具分组包含网站上选择为工具的补丁。";
+"patch.info.utility.toggle" = "此开关用于启用或停用对应的工具补丁。";
+"patch.info.other.description" = "其他分组包含网站上选择为其他的补丁。";
+"patch.info.other.toggle" = "此开关用于启用或停用对应的其他补丁。";
 
 "patch.info.mod.description" = "MOD 分组显示归类为 MOD 的补丁。选择此分组即可查看和管理应用中的 MOD 补丁。";
 

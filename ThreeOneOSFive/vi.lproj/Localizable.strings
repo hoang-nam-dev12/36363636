@@ -534,7 +534,7 @@
 
 "patch.info.mod.description" = "Nhóm MOD hiển thị các patch được phân loại theo MOD. Chọn nhóm này để xem và quản lý các patch MOD có trong ứng dụng.";
 
-"patch.info.holo.description" = "Nhóm HOLO hiển thị các patch được phân loại theo HOLO. Chọn nhóm này để xem và quản lý các patch HOLO có trong ứng dụng.";
+"patch.info.holo.description" = "Nhóm HIỂN THỊ / ESP chứa các patch được chọn loại Hiển thị / ESP trên website.";
 
 "settings.function_selector_corner_radius" = "Độ bo góc AIM / HOLO / MOD";
 
@@ -544,7 +544,11 @@
 
 "patch.info.function.title" = "%@ — hướng dẫn";
 
-"patch.info.holo.toggle" = "Công tắc này bật hoặc tắt patch HOLO tương ứng. Trạng thái chỉ được cập nhật sau khi thao tác patch hoàn tất thành công.";
+"patch.info.holo.toggle" = "Công tắc này bật hoặc tắt patch HIỂN THỊ / ESP tương ứng. Trạng thái chỉ được cập nhật sau khi thao tác patch hoàn tất thành công.";
+"patch.info.utility.description" = "Nhóm TIỆN ÍCH chứa các patch được chọn loại Tiện ích trên website.";
+"patch.info.utility.toggle" = "Công tắc này bật hoặc tắt patch TIỆN ÍCH tương ứng.";
+"patch.info.other.description" = "Nhóm KHÁC chứa các patch được chọn loại Khác trên website.";
+"patch.info.other.toggle" = "Công tắc này bật hoặc tắt patch thuộc nhóm KHÁC tương ứng.";
 
 /* 3105 repository compatibility additions */
 "common.delete" = "Xóa";

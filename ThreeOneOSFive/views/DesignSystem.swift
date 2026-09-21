@@ -10,7 +10,7 @@ enum AppTheme {
                 : UIColor(red: 0.10, green: 0.40, blue: 0.90, alpha: 1.00)  // #1A66E6 blue light
         }
     )
-    /// Dedicated brighter blue for the AIM/HOLO/MOD selector.
+    /// Dedicated brighter blue for the Free Fire category selector.
     static let aimHoloBlue = Color(
         red: 0.08,
         green: 0.62,

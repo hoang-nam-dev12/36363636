@@ -47,14 +47,38 @@ struct PatchDirectory: Codable, Identifiable, Hashable, Sendable {
 
 // MARK: - Patch classification
 
-/// High-level patch type inferred from the human-readable patch name.
-/// Matching is intentionally case-insensitive and punctuation-tolerant.
+/// Patch category shown by the iOS client. Server-managed packages use the
+/// category selected in Patch Cloud; name inference is only a fallback for
+/// packages imported manually on the device.
 enum PatchType: String, CaseIterable, Identifiable, Sendable {
     case aim = "Aim"
-    case holo = "Holo"
+    case visual = "Hiển thị"
     case mod = "Mod"
+    case utility = "Tiện ích"
+    case other = "Khác"
 
     var id: String { rawValue }
+
+    var shortLabel: String {
+        switch self {
+        case .aim: return "AIM"
+        case .visual: return "ESP"
+        case .mod: return "MOD"
+        case .utility: return "TIỆN ÍCH"
+        case .other: return "KHÁC"
+        }
+    }
+
+    static func serverCategory(_ raw: String?) -> PatchType? {
+        switch raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "aim": return .aim
+        case "visual": return .visual
+        case "mod": return .mod
+        case "utility": return .utility
+        case "other": return .other
+        default: return nil
+        }
+    }
 
     static func classify(_ name: String) -> PatchType {
         let normalized = name.folding(options: [.diacriticInsensitive, .caseInsensitive],
@@ -65,8 +89,14 @@ enum PatchType: String, CaseIterable, Identifiable, Sendable {
         if normalized.range(of: #"\baim\b"#, options: .regularExpression) != nil {
             return .aim
         }
-        if normalized.range(of: #"\bholo\b"#, options: .regularExpression) != nil {
-            return .holo
+        if normalized.range(of: #"\b(holo|visual|esp)\b"#, options: .regularExpression) != nil {
+            return .visual
+        }
+        if normalized.range(of: #"\b(utility|tien ich)\b"#, options: .regularExpression) != nil {
+            return .utility
+        }
+        if normalized.range(of: #"\b(other|khac)\b"#, options: .regularExpression) != nil {
+            return .other
         }
         return .mod
     }

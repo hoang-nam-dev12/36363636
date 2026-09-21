@@ -60,6 +60,172 @@ struct OnlineFileItem: Codable, Identifiable {
     }
 }
 
+// MARK: - Persisted server classification
+
+/// Keeps the website's game/category choices attached to an imported package.
+/// The .3105 package format predates these fields, so the classification must
+/// be retained alongside the local library rather than inferred from its name.
+private enum ServerPatchMetadataStore {
+    struct Record: Codable, Hashable {
+        let serverID: String
+        let packageID: String?
+        let title: String
+        let filename: String
+        let game: String
+        let category: String
+    }
+
+    private static let storageKey = "PatchProjects.serverMetadata.v1"
+    private static let cacheKey = NSString(string: storageKey)
+
+    /// SwiftUI asks for the category of the same patch several times while it
+    /// lays out badges, tabs and cards. Keep the decoded records in memory so
+    /// those render passes do not repeatedly decode the UserDefaults payload.
+    private final class RecordCache: NSObject {
+        let records: [Record]
+
+        init(_ records: [Record]) {
+            self.records = records
+        }
+    }
+
+    private static let cache = NSCache<NSString, RecordCache>()
+
+    static func replace(with files: [OnlineFileItem]) {
+        let previous = Dictionary(uniqueKeysWithValues: load().map { ($0.serverID, $0) })
+        let records = files.compactMap { file -> Record? in
+            guard let fresh = record(from: file) else { return nil }
+            guard fresh.packageID == nil,
+                  let associatedID = previous[file.id]?.packageID else {
+                return fresh
+            }
+            return replacingPackageID(in: fresh, with: associatedID)
+        }
+        save(records)
+    }
+
+    static func associate(_ file: OnlineFileItem, packageID: UUID) {
+        guard let fresh = record(from: file) else { return }
+        var records = load()
+        let associated = replacingPackageID(
+            in: fresh,
+            with: packageID.uuidString.lowercased()
+        )
+        if let index = records.firstIndex(where: { $0.serverID == file.id }) {
+            records[index] = associated
+        } else {
+            records.append(associated)
+        }
+        save(records)
+    }
+
+    static func packageID(for file: OnlineFileItem) -> String? {
+        load().first(where: { $0.serverID == file.id })?.packageID
+    }
+
+    static func record(for item: PatchLibraryItem) -> Record? {
+        let records = load()
+        let packageID = item.summary.packageID.uuidString.lowercased()
+        if let exact = records.first(where: { $0.packageID == packageID }) {
+            return exact
+        }
+
+        var identities = Set<String>()
+        identities.insert(normalizedIdentity(item.packageURL.deletingPathExtension().lastPathComponent))
+        if let projectName = item.project?.name {
+            identities.insert(normalizedIdentity(projectName))
+        }
+        identities.remove("")
+
+        return records.first { record in
+            let recordIdentities = [
+                normalizedIdentity(record.title),
+                normalizedIdentity(URL(fileURLWithPath: record.filename).deletingPathExtension().lastPathComponent)
+            ]
+            return recordIdentities.contains(where: identities.contains)
+        }
+    }
+
+    private static func record(from file: OnlineFileItem) -> Record? {
+        guard let game = normalizedGame(file.game),
+              let category = PatchType.serverCategory(file.category) else {
+            return nil
+        }
+        return Record(
+            serverID: file.id,
+            packageID: normalizedPackageID(file.packageID),
+            title: file.title,
+            filename: file.filename,
+            game: game,
+            category: categoryKey(category)
+        )
+    }
+
+    private static func load() -> [Record] {
+        if let cached = cache.object(forKey: cacheKey) {
+            return cached.records
+        }
+
+        let records: [Record]
+        if let data = UserDefaults.standard.data(forKey: storageKey),
+           let decoded = try? JSONDecoder().decode([Record].self, from: data) {
+            records = decoded
+        } else {
+            records = []
+        }
+        cache.setObject(RecordCache(records), forKey: cacheKey)
+        return records
+    }
+
+    private static func save(_ records: [Record]) {
+        guard let data = try? JSONEncoder().encode(records) else { return }
+        cache.setObject(RecordCache(records), forKey: cacheKey)
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    private static func replacingPackageID(in record: Record, with packageID: String) -> Record {
+        Record(
+            serverID: record.serverID,
+            packageID: packageID,
+            title: record.title,
+            filename: record.filename,
+            game: record.game,
+            category: record.category
+        )
+    }
+
+    private static func normalizedGame(_ raw: String?) -> String? {
+        guard let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              ["all", "ff", "ffm"].contains(value) else {
+            return nil
+        }
+        return value
+    }
+
+    private static func normalizedPackageID(_ raw: String?) -> String? {
+        guard let raw, let uuid = UUID(uuidString: raw) else { return nil }
+        return uuid.uuidString.lowercased()
+    }
+
+    private static func categoryKey(_ category: PatchType) -> String {
+        switch category {
+        case .aim: return "aim"
+        case .visual: return "visual"
+        case .mod: return "mod"
+        case .utility: return "utility"
+        case .other: return "other"
+        }
+    }
+
+    private static func normalizedIdentity(_ raw: String) -> String {
+        String(
+            raw.unicodeScalars
+                .filter { CharacterSet.alphanumerics.contains($0) }
+                .map { Character($0) }
+        ).lowercased()
+    }
+}
+
 // MARK: - Online file fetcher (unchanged)
 @MainActor
 final class OnlineFileFetcher: ObservableObject {
@@ -94,7 +260,9 @@ final class OnlineFileFetcher: ObservableObject {
                 throw URLError(.badServerResponse)
             }
             let decoded = try JSONDecoder().decode([OnlineFileItem].self, from: data)
-            onlineFiles = decoded.filter { $0.status }
+            let activeFiles = decoded.filter { $0.status }
+            ServerPatchMetadataStore.replace(with: activeFiles)
+            onlineFiles = activeFiles
             lastFetchSucceeded = true
         } catch {
             log("online-files: fetch failed – \(error.localizedDescription)")
@@ -164,7 +332,10 @@ final class OnlineFileFetcher: ObservableObject {
     private func reconcileMissingServerPackages(manifest: [OnlineFileItem]) async {
         let key = "PatchProjects.serverManagedPackageIDs.v1"
         let previous = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
-        let current = Set(manifest.compactMap { normalizedPackageID($0.packageID) })
+        let current = Set(manifest.compactMap { file in
+            normalizedPackageID(file.packageID)
+                ?? normalizedPackageID(ServerPatchMetadataStore.packageID(for: file))
+        })
         guard !previous.isEmpty else {
             persistManagedPackageIDs(current, key: key)
             return
@@ -196,7 +367,7 @@ final class OnlineFileFetcher: ObservableObject {
     }
 
     private func removeManagedPackage(for file: OnlineFileItem) {
-        guard let packageID = normalizedPackageID(file.packageID) else { return }
+        guard let packageID = resolvedPackageID(for: file) else { return }
         guard let item = PatchProjectLibrary.load().first(where: {
             $0.summary.packageID.uuidString.lowercased() == packageID
         }) else { return }
@@ -213,11 +384,41 @@ final class OnlineFileFetcher: ObservableObject {
     }
 
     private func markServerManaged(_ file: OnlineFileItem) {
-        guard let packageID = normalizedPackageID(file.packageID) else { return }
+        guard let packageID = resolvedPackageID(for: file) else { return }
+        if let uuid = UUID(uuidString: packageID) {
+            ServerPatchMetadataStore.associate(file, packageID: uuid)
+        }
         let key = "PatchProjects.serverManagedPackageIDs.v1"
         var ids = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
         ids.insert(packageID)
         persistManagedPackageIDs(ids, key: key)
+    }
+
+    private func resolvedPackageID(for file: OnlineFileItem) -> String? {
+        if let direct = normalizedPackageID(file.packageID)
+            ?? normalizedPackageID(ServerPatchMetadataStore.packageID(for: file)) {
+            return direct
+        }
+
+        let serverIdentities = Set([
+            Self.normalizedLocalIdentity(file.title),
+            Self.normalizedLocalIdentity(
+                URL(fileURLWithPath: file.filename).deletingPathExtension().lastPathComponent
+            )
+        ].filter { !$0.isEmpty })
+
+        guard let local = PatchProjectLibrary.load().first(where: { item in
+            let localIdentities = [
+                Self.normalizedLocalIdentity(item.packageURL.deletingPathExtension().lastPathComponent),
+                Self.normalizedLocalIdentity(item.project?.name ?? "")
+            ]
+            return localIdentities.contains(where: serverIdentities.contains)
+        }) else {
+            return nil
+        }
+
+        ServerPatchMetadataStore.associate(file, packageID: local.summary.packageID)
+        return local.summary.packageID.uuidString.lowercased()
     }
 
     private func persistManagedPackageIDs(_ ids: Set<String>, key: String) {
@@ -238,6 +439,7 @@ final class OnlineFileFetcher: ObservableObject {
             log("startup-patch: using local download cache – \(file.title)")
             return await importLocalPackage(
                 cached,
+                manifest: file,
                 password: file.password,
                 store: store,
                 removeCacheAfterSuccess: true
@@ -287,6 +489,7 @@ final class OnlineFileFetcher: ObservableObject {
 
             return await importLocalPackage(
                 cacheURL,
+                manifest: file,
                 password: file.password,
                 store: store,
                 removeCacheAfterSuccess: true
@@ -301,6 +504,7 @@ final class OnlineFileFetcher: ObservableObject {
 
     private func importLocalPackage(
         _ packageURL: URL,
+        manifest file: OnlineFileItem,
         password: String?,
         store: PatchProjectStore,
         removeCacheAfterSuccess: Bool
@@ -309,11 +513,16 @@ final class OnlineFileFetcher: ObservableObject {
         guard let data = try? Data(contentsOf: packageURL, options: .mappedIfSafe) else {
             return false
         }
+        let packageID = try? PatchPackageCodec.inspect(data).packageID
         let ok = await store.importPackageAndWait(
             data: data,
             password: password,
             timeout: 45
         )
+
+        if ok, let packageID {
+            ServerPatchMetadataStore.associate(file, packageID: packageID)
+        }
 
         if ok && removeCacheAfterSuccess {
             try? FileManager.default.removeItem(at: packageURL)
@@ -776,6 +985,10 @@ struct OnlineFilesSheetView: View {
                 return
             }
 
+            if let packageID = try? PatchPackageCodec.inspect(data).packageID {
+                ServerPatchMetadataStore.associate(file, packageID: packageID)
+            }
+
             log("batch-download: imported \(finalName)")
             updateBatch(id: file.id, fraction: 1.0, status: .done)
             await MainActor.run { batchDoneCount += 1 }
@@ -906,6 +1119,9 @@ struct OnlineFilesSheetView: View {
                 )
                 guard imported else {
                     throw PatchPackageError.invalidPasswordOrCorruptedPackage
+                }
+                if let packageID = try? PatchPackageCodec.inspect(data).packageID {
+                    ServerPatchMetadataStore.associate(file, packageID: packageID)
                 }
                 withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) { showSuccessToast = true }
                 try? await Task.sleep(nanoseconds: 2_500_000_000)
@@ -1386,14 +1602,18 @@ private enum PatchInfoTopic: Identifiable {
         case .function(let type):
             switch type {
             case .aim: return "patch.info.aim.description"
-            case .holo: return "patch.info.holo.description"
+            case .visual: return "patch.info.holo.description"
             case .mod: return "patch.info.mod.description"
+            case .utility: return "patch.info.utility.description"
+            case .other: return "patch.info.other.description"
             }
         case .patch(let type):
             switch type {
             case .aim: return "patch.info.aim.toggle"
-            case .holo: return "patch.info.holo.toggle"
+            case .visual: return "patch.info.holo.toggle"
             case .mod: return "patch.info.mod.toggle"
+            case .utility: return "patch.info.utility.toggle"
+            case .other: return "patch.info.other.toggle"
             }
         }
     }
@@ -1465,27 +1685,12 @@ struct PatchAppGroup: Identifiable, Hashable {
         items.map { $0.packageURL.lastPathComponent }
     }
 
-    /// AIM/HOLO/MOD are a dedicated UI concept for FFM/FFTH only.
-    /// Other applications expose their patches directly and therefore do not
-    /// carry these three function buckets in the UI.
-    var aimItems: [PatchLibraryItem] {
+    /// Free Fire categories come from the website manifest. Imported packages
+    /// without server metadata retain name-based classification as a fallback.
+    func items(for type: PatchType) -> [PatchLibraryItem] {
         guard kind == .ffm || kind == .ffth else { return [] }
         return items.filter {
-            PatchType.classify(PatchAppGrouping.classificationName(for: $0)) == .aim
-        }
-    }
-
-    var holoItems: [PatchLibraryItem] {
-        guard kind == .ffm || kind == .ffth else { return [] }
-        return items.filter {
-            PatchType.classify(PatchAppGrouping.classificationName(for: $0)) == .holo
-        }
-    }
-
-    var modItems: [PatchLibraryItem] {
-        guard kind == .ffm || kind == .ffth else { return [] }
-        return items.filter {
-            PatchType.classify(PatchAppGrouping.classificationName(for: $0)) == .mod
+            PatchAppGrouping.patchType(for: $0) == type
         }
     }
 
@@ -1511,8 +1716,8 @@ enum PatchAppKind: String, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .ffm: return "FFM"
-        case .ffth: return "FFTH"
+        case .ffm: return "FREE FIRE MAX"
+        case .ffth: return "FREE FIRE THƯỜNG"
         case .capcut: return "CAPCUT"
         case .pubg: return "PUBG"
         case .lienQuan: return "LIÊN QUÂN"
@@ -1536,8 +1741,8 @@ enum PatchAppKind: String, CaseIterable {
 
 enum PatchAppGrouping {
     private static let predefined: [(kind: PatchAppKind, name: String)] = [
-        (.ffm, "FFM"),
-        (.ffth, "FFTH"),
+        (.ffth, "FREE FIRE THƯỜNG"),
+        (.ffm, "FREE FIRE MAX"),
         (.capcut, "CAPCUT"),
         (.pubg, "PUBG"),
         (.lienQuan, "LIÊN QUÂN"),
@@ -1563,30 +1768,21 @@ enum PatchAppGrouping {
 
         for item in items {
             let raw = classificationName(for: item)
-            let kind = classifyKind(raw)
-            let groupKey: String
+            for kind in targetKinds(for: item, fallbackName: raw) where kind != .other {
+                let groupKey = key(for: kind)
+                if !(buckets[groupKey] ?? []).contains(where: { $0.id == item.id }) {
+                    buckets[groupKey, default: []].append(item)
+                }
+                kinds[groupKey] = kind
 
-            switch kind {
-            case .ffm: groupKey = key(for: .ffm)
-            case .ffth: groupKey = key(for: .ffth)
-            case .capcut: groupKey = key(for: .capcut)
-            case .pubg: groupKey = key(for: .pubg)
-            case .lienQuan: groupKey = key(for: .lienQuan)
-            case .locket: groupKey = key(for: .locket)
-            case .other:
-                groupKey = canonicalOtherKey(raw)
-            }
+                if names[groupKey] == nil {
+                    names[groupKey] = displayName(for: raw, item: item)
+                }
 
-            buckets[groupKey, default: []].append(item)
-            kinds[groupKey] = kind
-
-            if names[groupKey] == nil {
-                names[groupKey] = displayName(for: raw, item: item)
-            }
-
-            for bundleID in item.project?.allBundleIdentifiers ?? [] where !bundleID.isEmpty {
-                if !(bundles[groupKey] ?? []).contains(bundleID) {
-                    bundles[groupKey, default: []].append(bundleID)
+                for bundleID in item.project?.allBundleIdentifiers ?? [] where !bundleID.isEmpty {
+                    if !(bundles[groupKey] ?? []).contains(bundleID) {
+                        bundles[groupKey, default: []].append(bundleID)
+                    }
                 }
             }
         }
@@ -1608,7 +1804,7 @@ enum PatchAppGrouping {
             )
         }
         .sorted { lhs, rhs in
-            let order: [PatchAppKind] = [.ffm, .ffth, .capcut, .pubg, .lienQuan, .locket, .other]
+            let order: [PatchAppKind] = [.ffth, .ffm, .capcut, .pubg, .lienQuan, .locket, .other]
             let li = order.firstIndex(of: lhs.kind) ?? order.count
             let ri = order.firstIndex(of: rhs.kind) ?? order.count
             if li != ri { return li < ri }
@@ -1622,33 +1818,41 @@ enum PatchAppGrouping {
         return project.isEmpty ? filename : "\(project) \(filename)"
     }
 
+    static func patchType(for item: PatchLibraryItem) -> PatchType {
+        if let metadata = ServerPatchMetadataStore.record(for: item),
+           let type = PatchType.serverCategory(metadata.category) {
+            return type
+        }
+        return PatchType.classify(classificationName(for: item))
+    }
+
+    private static func targetKinds(
+        for item: PatchLibraryItem,
+        fallbackName: String
+    ) -> [PatchAppKind] {
+        switch ServerPatchMetadataStore.record(for: item)?.game {
+        case "ff": return [.ffth]
+        case "ffm": return [.ffm]
+        case "all": return [.ffth, .ffm]
+        default: return [classifyKind(fallbackName)]
+        }
+    }
+
     private static func classifyKind(_ raw: String) -> PatchAppKind {
         let compact = normalizedCompact(raw)
 
-        // FFTH and FFM are intentionally checked separately and never merged.
-        if containsToken(compact, token: "ffth") { return .ffth }
-        if containsToken(compact, token: "ffm") { return .ffm }
+        // FF and FFM are intentionally checked separately and never merged.
+        if containsToken(compact, token: "freefiremax") || containsToken(compact, token: "ffm") {
+            return .ffm
+        }
+        if containsToken(compact, token: "ffth") || containsToken(compact, token: "freefire") {
+            return .ffth
+        }
         if compact.contains("capcut") { return .capcut }
         if compact.contains("pubg") { return .pubg }
         if compact.contains("lienquan") { return .lienQuan }
         if compact.contains("locket") { return .locket }
         return .other
-    }
-
-    private static func canonicalOtherKey(_ value: String) -> String {
-        let normalized = value
-            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            .replacingOccurrences(of: "_", with: " ")
-            .replacingOccurrences(of: "-", with: " ")
-            .replacingOccurrences(of: ".", with: " ")
-            .split(whereSeparator: { $0.isWhitespace })
-            .map(String.init)
-            .filter {
-                !["aim", "holo", "mod", "patch", "3105"].contains($0.lowercased())
-            }
-
-        let result = normalized.joined(separator: " ").lowercased()
-        return result.isEmpty ? "other" : "other-\(result)"
     }
 
     private static func key(for kind: PatchAppKind) -> String {
@@ -1672,8 +1876,8 @@ enum PatchAppGrouping {
 
     private static func displayName(for raw: String, item: PatchLibraryItem) -> String {
         switch classifyKind(raw) {
-        case .ffm: return "FFM"
-        case .ffth: return "FFTH"
+        case .ffm: return "FREE FIRE MAX"
+        case .ffth: return "FREE FIRE THƯỜNG"
         case .capcut: return "CAPCUT"
         case .pubg: return "PUBG"
         case .lienQuan: return "LIÊN QUÂN"
@@ -1758,29 +1962,13 @@ private struct PatchAppCard: View {
                 .minimumScaleFactor(0.65)
 
             if group.kind == .ffm || group.kind == .ffth {
-                HStack(spacing: 6) {
-                    typeBadge("AIM", count: group.aimItems.count)
-                    typeBadge("HOLO", count: group.holoItems.count)
-                    typeBadge("MOD", count: group.modItems.count)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(PatchType.allCases.filter { !group.items(for: $0).isEmpty }) { type in
+                            typeBadge(type.shortLabel, count: group.items(for: type).count)
+                        }
+                    }
                 }
-            } else if group.kind == .other {
-                // REQ 4: "Khác" badge — tech icon + patch toggle indicator
-                HStack(spacing: 5) {
-                    Image(systemName: "puzzlepiece.extension.fill")
-                        .font(.system(size: 7, weight: .bold))
-                        .foregroundStyle(Color(red: 1.0, green: 0.72, blue: 0.10).opacity(0.88))
-                    Text("PATCH MIX")
-                        .font(.system(size: 6.5, weight: .black, design: .monospaced))
-                        .tracking(0.8)
-                        .foregroundStyle(Color(red: 1.0, green: 0.72, blue: 0.10).opacity(0.88))
-                }
-                .padding(.horizontal, 7)
-                .padding(.vertical, 4)
-                .background(
-                    Color(red: 1.0, green: 0.72, blue: 0.10).opacity(0.12),
-                    in: Capsule()
-                )
-                .overlay(Capsule().stroke(Color.clear, lineWidth: 0))
             }
 
             Group {
@@ -1954,23 +2142,18 @@ private struct PatchAppDetailView: View {
     @State private var openResult: String?
     @State private var infoTopic: PatchInfoTopic?
 
-    /// FFM/FFTH expose the three function channels.
+    /// Free Fire and Free Fire MAX expose the categories selected on the web.
     /// Other applications intentionally expose their patches directly so they
-    /// do not inherit the AIM/HOLO/MOD configuration UI.
+    /// do not inherit the Free Fire category UI.
     private var usesFunctionChannels: Bool {
         group.kind == .ffm || group.kind == .ffth
     }
 
     private var selectedItems: [PatchLibraryItem] {
-        // REQ 4: .other always shows all its patches — they are fully toggleable.
-        // FFM/FFTH use the AIM/HOLO/MOD channel filter.
+        // Free Fire groups use the exact Patch Cloud category.
         // All other known apps (CAPCUT, PUBG, LIÊN QUÂN) expose patches directly.
         guard usesFunctionChannels else { return group.items }
-        switch selectedType {
-        case .aim:  return group.aimItems
-        case .holo: return group.holoItems
-        case .mod:  return group.modItems
-        }
+        return group.items(for: selectedType)
     }
 
     var body: some View {
@@ -2012,6 +2195,10 @@ private struct PatchAppDetailView: View {
         }
         .task {
             patchState.reconcile(group.items)
+            if group.items(for: selectedType).isEmpty,
+               let firstAvailable = PatchType.allCases.first(where: { !group.items(for: $0).isEmpty }) {
+                selectedType = firstAvailable
+            }
         }
         .alert("Không thể thay đổi patch", isPresented: Binding(
             get: { patchState.errorMessage != nil },
@@ -2097,13 +2284,16 @@ private struct PatchAppDetailView: View {
         }
     }
 
-    // MARK: - FLUXCORE: Redesigned AIM / HOLO / MOD selector (REQ 3)
+    // MARK: - FLUXCORE: Patch Cloud category selector
 
-    /// Full-width row of three futuristic function channel buttons.
+    /// Responsive grid of Patch Cloud category buttons.
     /// Each button carries a custom tech icon, a glow ring, and an animated
     /// selection state consistent with the Free Fire / FLUXCORE visual language.
     private var typeSelector: some View {
-        HStack(spacing: 10) {
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
+            spacing: 8
+        ) {
             ForEach(PatchType.allCases) { type in
                 typeSelectorButton(for: type)
             }
@@ -2111,12 +2301,14 @@ private struct PatchAppDetailView: View {
     }
 
     /// Returns the SF Symbol name that best represents each channel.
-    /// AIM  → crosshair + gun (scope), HOLO → radar/location, MOD → wrench/mod
+    /// Each website category receives a distinct icon.
     private func typeIconName(_ type: PatchType) -> String {
         switch type {
         case .aim:  return "scope"                        // crosshair/scope — precision aim
-        case .holo: return "dot.radiowaves.up.forward"    // radar/hologram signal
+        case .visual: return "dot.radiowaves.up.forward"  // display/ESP signal
         case .mod:  return "wrench.adjustable.fill"       // mod tool
+        case .utility: return "slider.horizontal.3"
+        case .other: return "square.grid.2x2.fill"
         }
     }
 
@@ -2124,12 +2316,14 @@ private struct PatchAppDetailView: View {
     private func typeIconSecondary(_ type: PatchType) -> String {
         switch type {
         case .aim:  return "triangle.fill"
-        case .holo: return "hexagon.fill"
+        case .visual: return "hexagon.fill"
         case .mod:  return "gear"
+        case .utility: return "circle.grid.cross.fill"
+        case .other: return "diamond.fill"
         }
     }
 
-    /// One high-tech button cell for AIM, HOLO, or MOD.
+    /// One high-tech button cell for a Patch Cloud category.
     @ViewBuilder
     private func typeSelectorButton(for type: PatchType) -> some View {
         let isSelected = selectedType == type
@@ -2267,7 +2461,7 @@ private struct PatchAppDetailView: View {
     private func patchRequirementRow(_ item: PatchLibraryItem) -> some View {
         let busy = patchState.isBusy(item)
         let enabled = patchState.isEnabled(item)
-        let itemType = PatchType.classify(PatchAppGrouping.classificationName(for: item))
+        let itemType = PatchAppGrouping.patchType(for: item)
         let visualOpacity = functionSettings.opacity(for: itemType)
 
         return HStack(spacing: 12) {
@@ -2498,11 +2692,7 @@ private struct PatchAppDetailView: View {
     }
 
     private func count(for type: PatchType) -> Int {
-        switch type {
-        case .aim: return group.aimItems.count
-        case .holo: return group.holoItems.count
-        case .mod: return group.modItems.count
-        }
+        group.items(for: type).count
     }
 }
 

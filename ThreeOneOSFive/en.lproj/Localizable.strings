@@ -534,11 +534,15 @@
 
 "patch.info.aim.toggle" = "This switch enables or disables the selected AIM patch. The UI state updates only after the patch operation completes successfully.";
 
-"patch.info.holo.description" = "The HOLO group shows patches classified as HOLO. Select it to review and manage the HOLO patches available in the app.";
+"patch.info.holo.description" = "The DISPLAY / ESP group contains patches assigned to Display / ESP on the website.";
 
 "settings.function_selector_corner_radius" = "AIM / HOLO / MOD corner radius";
 
-"patch.info.holo.toggle" = "This switch enables or disables the selected HOLO patch. The UI state updates only after the patch operation completes successfully.";
+"patch.info.holo.toggle" = "This switch enables or disables the selected DISPLAY / ESP patch. The UI state updates only after the patch operation completes successfully.";
+"patch.info.utility.description" = "The UTILITY group contains patches assigned to Utility on the website.";
+"patch.info.utility.toggle" = "This switch enables or disables the selected UTILITY patch.";
+"patch.info.other.description" = "The OTHER group contains patches assigned to Other on the website.";
+"patch.info.other.toggle" = "This switch enables or disables the selected OTHER patch.";
 
 "patch.info.mod.toggle" = "This switch enables or disables the selected MOD patch. The UI state updates only after the patch operation completes successfully.";
 

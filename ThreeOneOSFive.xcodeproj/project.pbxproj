@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		3105P103 /* libPPAPIKey_basic.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3105P102; };
 		3105N202 /* DynamicAssets.json in Resources */ = {isa = PBXBuildFile; fileRef = 3105N102; };
 		3105N200 /* DynamicAssetSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105N100; };
 		3105N201 /* DynamicAssetRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105N101; };
@@ -86,6 +87,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		3105P101 /* PPAPIKey.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PPAPIKey.h; sourceTree = "<group>"; };
+		3105P102 /* libPPAPIKey_basic.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libPPAPIKey_basic.a; sourceTree = "<group>"; };
 		3105N102 /* DynamicAssets.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = DynamicAssets.json; sourceTree = "<group>"; };
 		3105N100 /* DynamicAssetSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicAssetSyncService.swift; sourceTree = "<group>"; };
 		3105N101 /* DynamicAssetRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicAssetRouter.swift; sourceTree = "<group>"; };
@@ -187,12 +190,22 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3105P103 /* libPPAPIKey_basic.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		3105P100 /* PPAPIKey */ = {
+			isa = PBXGroup;
+			children = (
+				3105P101 /* PPAPIKey.h */,
+				3105P102 /* libPPAPIKey_basic.a */,
+			);
+			path = PPAPIKey;
+			sourceTree = "<group>";
+		};
 		3105A400 = {
 			isa = PBXGroup;
 			children = (
@@ -204,6 +217,7 @@
 		3105A401 /* ThreeOneOSFive */ = {
 			isa = PBXGroup;
 			children = (
+				3105P100 /* PPAPIKey */,
 				3105N102 /* DynamicAssets.json */,
 				3105A050 /* ThreeOneOSFive-Bridging-Header.h */,
 				3105A060 /* Info.plist */,
@@ -506,7 +520,21 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 2.0;
-				OTHER_LDFLAGS = "-lz";
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/ThreeOneOSFive/PPAPIKey",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lz",
+					"-lc++",
+					"-framework",
+					"AudioToolbox",
+					"-framework",
+					"Security",
+					"-framework",
+					"SystemConfiguration",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.apple.mobile.MobileHouseArrest";
 				PRODUCT_NAME = 3105;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -543,7 +571,21 @@
 					"-Wno-return-type",
 					"-Wno-deprecated-declarations",
 				);
-				OTHER_LDFLAGS = "-lz";
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/ThreeOneOSFive/PPAPIKey",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lz",
+					"-lc++",
+					"-framework",
+					"AudioToolbox",
+					"-framework",
+					"Security",
+					"-framework",
+					"SystemConfiguration",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.apple.mobile.MobileHouseArrest";
 				PRODUCT_NAME = 3105;
 				SWIFT_EMIT_LOC_STRINGS = YES;

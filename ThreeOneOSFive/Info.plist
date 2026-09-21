@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>IHAX</string>
+	<string>Duy Mạnh Store</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -13,13 +13,13 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>IHAX</string>
+	<string>Duy Mạnh Store</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1.1</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
-	<string>7</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -73,13 +73,15 @@
 	<key>UIFileSharingEnabled</key>
 	<false/>
 	<key>AppReleaseDisplayVersion</key>
-	<string>1.1.1</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>IHAX needs access to photos for wallpaper customization.</string>
+	<string>Duy Mạnh Store cần quyền truy cập ảnh để tùy chỉnh hình nền.</string>
 	<key>NSDocumentsFolderUsageDescription</key>
-	<string>IHAX needs access to documents.</string>
+	<string>Duy Mạnh Store cần quyền truy cập tài liệu để nhập file patch.</string>
+	<key>PatchCloudManifestURL</key>
+	<string>https://hwy-capital-question-survive.trycloudflare.com/api/patches</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -47,22 +47,22 @@ jobs:
         run: |
           mkdir -p Payload
           cp -r build/3105.xcarchive/Products/Applications/3105.app Payload/
-          zip -r IHAX.ipa Payload
+          zip -r Duy-Manh-Store.ipa Payload
           rm -rf Payload
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: IHAX_IPA
-          path: IHAX.ipa
+          name: Duy-Manh-Store-IPA
+          path: Duy-Manh-Store.ipa
           retention-days: 30
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "IHAX"
-          tag_name: "v1.0-${{ github.run_number }}"
-          files: IHAX.ipa
+          name: "Duy Mạnh Store"
+          tag_name: "v2.0-${{ github.run_number }}"
+          files: Duy-Manh-Store.ipa
           draft: false
           prerelease: false
         env:

@@ -120,6 +120,32 @@ final class PatchProjectStore: ObservableObject {
         return items.contains { $0.id == expectedID && $0.project != nil }
     }
 
+    @discardableResult
+    func importPackageAndWait(
+        data: Data,
+        password: String? = nil,
+        timeout: TimeInterval = 60
+    ) async -> Bool {
+        guard !isBusy,
+              let expectedID = try? PatchPackageCodec.inspect(data).packageID else {
+            return false
+        }
+
+        importPackage(data: data, password: password)
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while isBusy && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+
+        guard !isBusy, passwordRequest == nil else {
+            return false
+        }
+
+        reload()
+        return items.contains { $0.id == expectedID && $0.project != nil }
+    }
+
     func importPackage(at sourceURL: URL) {
         guard !isBusy else { return }
         isBusy = true

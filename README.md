@@ -1,38 +1,37 @@
 <p align="center">
-  <img src="docs/images/app-icon.png" width="132" alt="3105 app icon">
+  <img src="docs/images/app-icon.png" width="132" alt="Duy Mạnh Store app icon">
 </p>
 
-<h1 align="center">3105</h1>
+<h1 align="center">Duy Mạnh Store</h1>
 
 <p align="center">
-  A native iOS workspace for app-container files, portable patches, limited cleanup, and PosterBoard wallpaper packages.
+  A native iOS workspace for app-container files, portable .3105 patches, limited cleanup, and PosterBoard wallpaper packages.
 </p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-1.1.0-E6753A?style=flat-square">
+  <img alt="Version" src="https://img.shields.io/badge/version-2.0-E6753A?style=flat-square">
   <img alt="iOS" src="https://img.shields.io/badge/iOS-17.0–18.7.1%20%7C%2026.0–26.6.1%20%7C%2027%20beta%201–4-222222?style=flat-square">
   <img alt="Swift" src="https://img.shields.io/badge/Swift-5-F05138?style=flat-square&logo=swift&logoColor=white">
   <img alt="Languages" src="https://img.shields.io/badge/languages-English%20%7C%20Tiếng%20Việt%20%7C%20简体中文-E6753A?style=flat-square">
 </p>
 
 <p align="center">
-  <a href="README.vi.md">Tiếng Việt</a> ·
   <a href="docs/PATCH_GUIDE.md">Patch guide</a> ·
   <a href="#compatibility">Compatibility</a> ·
   <a href="#license">License</a>
 </p>
 
 > [!WARNING]
-> 3105 is research software for personal device management. Keep a backup and use it only on devices and data you own. Simulator screenshots demonstrate UI only; they do not verify device-level access.
+> Duy Mạnh Store is research software for personal device management. Keep a backup and use it only on devices and data you own. Simulator screenshots demonstrate UI only; they do not verify device-level access.
 
 ## Preview
 
 <p align="center">
-  <img src="docs/images/home.png" width="245" alt="3105 Home">
+  <img src="docs/images/home.png" width="245" alt="Duy Mạnh Store Home">
   &nbsp;
-  <img src="docs/images/patches.png" width="245" alt="3105 Patches">
+  <img src="docs/images/patches.png" width="245" alt="Duy Mạnh Store Patches">
   &nbsp;
-  <img src="docs/images/cleaner.png" width="245" alt="3105 Cleaner">
+  <img src="docs/images/cleaner.png" width="245" alt="Duy Mạnh Store Cleaner">
 </p>
 
 ## What's new in 1.1.0
@@ -89,9 +88,10 @@ Unlisted iOS 27 builds are marked unsupported rather than assumed compatible. Th
 ## Project layout
 
 ```text
-3105/
+Duy-Manh-Store/
 ├── ThreeOneOSFive/          # SwiftUI app, helpers, native bridges, localizations
 ├── ThreeOneOSFive.xcodeproj # Xcode project and 3105 scheme
+├── patch-cloud-web/         # Patch Cloud website and VPS/Cloudflare Tunnel bundle
 └── docs/images/             # Repository artwork and current UI previews
 ```
 
@@ -101,7 +101,7 @@ Do not publish logs, app containers, cookies, account databases, or patch payloa
 
 ## Credits
 
-3105 is developed and designed by [YangJiii](https://x.com/duongduong0908).
+Duy Mạnh Store is based on the 3105 project developed and designed by [YangJiii](https://x.com/duongduong0908).
 
 Special thanks to [0xjohnny](https://x.com/0xjohnny) for [FilzaSlop](https://github.com/0xjohnnydev/FilzaSlop) and related research:
 

@@ -20,6 +20,10 @@ struct OnlineFileItem: Codable, Identifiable {
     let created_at: Int
     let sha256: String?
     let packageID: String?
+    let game: String?
+    let category: String?
+    let password: String?
+    let size: Int?
 
     init(
         id: String,
@@ -29,7 +33,11 @@ struct OnlineFileItem: Codable, Identifiable {
         status: Bool,
         created_at: Int,
         sha256: String? = nil,
-        packageID: String? = nil
+        packageID: String? = nil,
+        game: String? = nil,
+        category: String? = nil,
+        password: String? = nil,
+        size: Int? = nil
     ) {
         self.id = id
         self.title = title
@@ -39,10 +47,15 @@ struct OnlineFileItem: Codable, Identifiable {
         self.created_at = created_at
         self.sha256 = sha256
         self.packageID = packageID
+        self.game = game
+        self.category = category
+        self.password = password
+        self.size = size
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, filename, url, status, created_at, sha256
+        case game, category, password, size
         case packageID = "package_id"
     }
 }
@@ -54,18 +67,20 @@ final class OnlineFileFetcher: ObservableObject {
     @Published var isLoading: Bool = false
     private(set) var lastFetchSucceeded = false
 
-    private var obfuscatedAPIURL: String {
-        // Patch list API: GET https://appfluxcore.site/api/patches_list.php?app=3105
-        let encryptedBytes: [UInt8] = [
-            0x69, 0x75, 0x75, 0x71, 0x72, 0x3B, 0x2E, 0x2E, 0x60, 0x71, 0x71, 0x67, 0x6D, 0x74, 0x79, 0x62, 0x6E, 0x73, 0x64, 0x2F, 0x72, 0x68, 0x75, 0x64, 0x2E, 0x60, 0x71, 0x68, 0x2E, 0x71, 0x60, 0x75, 0x62, 0x69, 0x64, 0x72, 0x5E, 0x6D, 0x68, 0x72, 0x75, 0x2F, 0x71, 0x69, 0x71, 0x3E, 0x60, 0x71, 0x71, 0x3C, 0x32, 0x30, 0x31, 0x34
-        ]
-        let xorKey: UInt8 = 0x01
-        let decryptedBytes = encryptedBytes.map { $0 ^ xorKey }
-        return String(bytes: decryptedBytes, encoding: .utf8) ?? ""
+    private var manifestURL: URL? {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: "PatchCloudManifestURL") as? String else {
+            return nil
+        }
+        return URL(string: value.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     func fetchServerFiles() async {
-        guard let url = URL(string: obfuscatedAPIURL) else { return }
+        guard let url = manifestURL else {
+            onlineFiles = []
+            lastFetchSucceeded = false
+            log("online-files: PatchCloudManifestURL is missing or invalid")
+            return
+        }
         isLoading = true
         lastFetchSucceeded = false
         defer { isLoading = false }
@@ -73,7 +88,11 @@ final class OnlineFileFetcher: ObservableObject {
             var request = URLRequest(url: url)
             request.httpMethod = "GET"
             request.timeoutInterval = 15
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
             let decoded = try JSONDecoder().decode([OnlineFileItem].self, from: data)
             onlineFiles = decoded.filter { $0.status }
             lastFetchSucceeded = true
@@ -217,7 +236,12 @@ final class OnlineFileFetcher: ObservableObject {
         if let cached = cachedStartupPackageURL(for: file),
            validateCachedPackage(cached, expectedSHA256: file.sha256) {
             log("startup-patch: using local download cache – \(file.title)")
-            return await importLocalPackage(cached, store: store, removeCacheAfterSuccess: true)
+            return await importLocalPackage(
+                cached,
+                password: file.password,
+                store: store,
+                removeCacheAfterSuccess: true
+            )
         }
 
         guard let rawURL = file.url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
@@ -263,6 +287,7 @@ final class OnlineFileFetcher: ObservableObject {
 
             return await importLocalPackage(
                 cacheURL,
+                password: file.password,
                 store: store,
                 removeCacheAfterSuccess: true
             )
@@ -276,18 +301,19 @@ final class OnlineFileFetcher: ObservableObject {
 
     private func importLocalPackage(
         _ packageURL: URL,
+        password: String?,
         store: PatchProjectStore,
         removeCacheAfterSuccess: Bool
     ) async -> Bool {
         guard isSafeRegularFile(packageURL) else { return false }
-
-        store.importPackage(at: packageURL)
-        let finished = await waitUntilImportFinishes(store: store, timeout: 45)
-        // A password-protected package can finish the import operation by
-        // presenting a password request while isBusy becomes false. It is not
-        // actually installed yet, so retain the cache and report failure.
-        let requiresPassword = store.passwordRequest != nil
-        let ok = finished && !requiresPassword
+        guard let data = try? Data(contentsOf: packageURL, options: .mappedIfSafe) else {
+            return false
+        }
+        let ok = await store.importPackageAndWait(
+            data: data,
+            password: password,
+            timeout: 45
+        )
 
         if ok && removeCacheAfterSuccess {
             try? FileManager.default.removeItem(at: packageURL)
@@ -421,6 +447,24 @@ struct PatchDownloadProgress: Identifiable {
 
     enum DownloadStatus {
         case pending, downloading, importing, done, failed(String)
+    }
+}
+
+private enum OnlinePatchDownloadError: LocalizedError {
+    case invalidURL
+    case insecureURL
+    case badResponse
+    case sizeMismatch
+    case checksumMismatch
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidURL: return "URL patch không hợp lệ"
+        case .insecureURL: return "URL patch phải dùng HTTPS"
+        case .badResponse: return "Server trả về phản hồi không hợp lệ"
+        case .sizeMismatch: return "Kích thước file không khớp manifest"
+        case .checksumMismatch: return "Checksum SHA-256 không khớp"
+        }
     }
 }
 
@@ -681,8 +725,7 @@ struct OnlineFilesSheetView: View {
     }
 
     private func downloadSingleForBatch(_ file: OnlineFileItem) async {
-        guard let rawURL = file.url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: rawURL) else {
+        guard let url = URL(string: file.url) else {
             updateBatch(id: file.id, fraction: 0, status: .failed("URL không hợp lệ"))
             await MainActor.run { batchErrorCount += 1 }
             return
@@ -707,9 +750,10 @@ struct OnlineFilesSheetView: View {
             defer { try? FileManager.default.removeItem(at: temporaryURL) }
 
             guard let httpResponse = response as? HTTPURLResponse,
-                  (200..<300).contains(httpResponse.statusCode) else {
-                throw URLError(.badServerResponse)
+                   (200..<300).contains(httpResponse.statusCode) else {
+                throw OnlinePatchDownloadError.badResponse
             }
+            try verifyDownloadedPatch(at: temporaryURL, manifest: file)
 
             updateBatch(id: file.id, fraction: 0.6, status: .importing)
 
@@ -721,7 +765,11 @@ struct OnlineFilesSheetView: View {
             try FileManager.default.copyItem(at: temporaryURL, to: dest)
             defer { try? FileManager.default.removeItem(at: dest) }
 
-            let imported = await store.importPackageAndWait(at: dest)
+            let data = try Data(contentsOf: dest, options: .mappedIfSafe)
+            let imported = await store.importPackageAndWait(
+                data: data,
+                password: file.password
+            )
             guard imported else {
                 updateBatch(id: file.id, fraction: 0, status: .failed("Import thất bại"))
                 await MainActor.run { batchErrorCount += 1 }
@@ -733,7 +781,7 @@ struct OnlineFilesSheetView: View {
             await MainActor.run { batchDoneCount += 1 }
 
         } catch {
-            let msg = (error as? URLError)?.localizedDescription ?? "Lỗi tải xuống"
+            let msg = error.localizedDescription.isEmpty ? "Lỗi tải xuống" : error.localizedDescription
             log("batch-download: failed \(file.filename) – \(error.localizedDescription)")
             updateBatch(id: file.id, fraction: 0, status: .failed(msg))
             await MainActor.run { batchErrorCount += 1 }
@@ -817,8 +865,14 @@ struct OnlineFilesSheetView: View {
 
     // Existing single-file download (unchanged logic, migrated to async/await)
     private func downloadAndImport(file: OnlineFileItem) {
-        guard let rawURL = file.url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: rawURL) else { return }
+        guard let url = URL(string: file.url) else {
+            log("single-download: invalid URL for \(file.filename)")
+            return
+        }
+        guard url.scheme?.lowercased() == "https", url.host != nil else {
+            log("single-download: rejected non-HTTPS URL for \(file.filename)")
+            return
+        }
         downloadingFileID = file.id
 
         Task(priority: .userInitiated) {
@@ -828,8 +882,14 @@ struct OnlineFilesSheetView: View {
                 config.timeoutIntervalForRequest = 45
                 config.timeoutIntervalForResource = 120
                 config.waitsForConnectivity = true
-                let (temporaryURL, _) = try await URLSession(configuration: config).download(from: url)
+                let (temporaryURL, response) = try await URLSession(configuration: config).download(from: url)
                 defer { try? FileManager.default.removeItem(at: temporaryURL) }
+
+                guard let httpResponse = response as? HTTPURLResponse,
+                      (200..<300).contains(httpResponse.statusCode) else {
+                    throw OnlinePatchDownloadError.badResponse
+                }
+                try verifyDownloadedPatch(at: temporaryURL, manifest: file)
 
                 let fileName = file.filename.isEmpty ? url.lastPathComponent : file.filename
                 let finalName = fileName.hasSuffix(".3105") ? fileName : "\(fileName).3105"
@@ -839,13 +899,48 @@ struct OnlineFilesSheetView: View {
                 try FileManager.default.copyItem(at: temporaryURL, to: dest)
                 defer { try? FileManager.default.removeItem(at: dest) }
 
-                store.importPackage(at: dest)
+                let data = try Data(contentsOf: dest, options: .mappedIfSafe)
+                let imported = await store.importPackageAndWait(
+                    data: data,
+                    password: file.password
+                )
+                guard imported else {
+                    throw PatchPackageError.invalidPasswordOrCorruptedPackage
+                }
                 withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) { showSuccessToast = true }
                 try? await Task.sleep(nanoseconds: 2_500_000_000)
                 withAnimation(.easeOut(duration: 0.5)) { showSuccessToast = false }
             } catch {
                 log("single-download: failed \(file.filename) – \(error.localizedDescription)")
             }
+        }
+    }
+
+    private func verifyDownloadedPatch(at url: URL, manifest file: OnlineFileItem) throws {
+        if let expectedSize = file.size, expectedSize > 0 {
+            let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            guard values.isRegularFile == true, values.fileSize == expectedSize else {
+                throw OnlinePatchDownloadError.sizeMismatch
+            }
+        }
+
+        guard let rawChecksum = file.sha256 else { return }
+        let expected = rawChecksum.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard expected.count == 64,
+              expected.unicodeScalars.allSatisfy({ $0.properties.isASCIIHexDigit }) else {
+            throw OnlinePatchDownloadError.checksumMismatch
+        }
+
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 4 * 1_024 * 1_024), !chunk.isEmpty {
+            if Task.isCancelled { throw CancellationError() }
+            hasher.update(data: chunk)
+        }
+        let actual = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        guard actual == expected else {
+            throw OnlinePatchDownloadError.checksumMismatch
         }
     }
 }

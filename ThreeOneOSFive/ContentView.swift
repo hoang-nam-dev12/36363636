@@ -39,24 +39,15 @@ class KeyAuthManager: ObservableObject {
     private var verificationSession: URLSession?
     private var verificationGeneration: UInt64 = 0
 
-    // ── Obfuscated endpoint (XOR 0x5A) ──
-    // Decoded: https://appfluxcore.site/api/check.php?key=
-    private var apiBaseURL: String {
-        let b: [UInt8] = [
-            0x32,0x2E,0x2E,0x2A,0x29,0x60,0x75,0x75,
-            0x3B,0x2A,0x2A,0x3C,0x36,0x2F,0x22,0x39,
-            0x35,0x28,0x3F,0x74,0x29,0x33,0x2E,0x3F,
-            0x75,0x3B,0x2A,0x33,0x75,0x39,0x32,0x3F,
-            0x39,0x31,0x74,0x2A,0x32,0x2A,0x65,0x31,
-            0x3F,0x23,0x67
-        ]
-        return String(bytes: b.map { $0 ^ 0x5A }, encoding: .utf8) ?? ""
-    }
+    // ── PPAPIKey Token (https://github.com/pp7803/APIKey) ──
+    static let ppToken = "NxqFdqkCLFnjaUbEXDShJmCLtYDOGlfeInmkByjQJfKOtpsWMoZIbCPphkfaKAEFnZuOlbrcaZazeOTjCiuMouVvICrwkfAFdsfm"
 
-    private func endpoint(for key: String) -> URL? {
-        let safe = key.addingPercentEncoding(
-            withAllowedCharacters: .alphanumerics.union(.init(charactersIn: "-_"))) ?? key
-        return URL(string: apiBaseURL + safe)
+    static func configurePPAPIKey() {
+        let api = PPAPIKey.shared()
+        api.setToken(ppToken)
+        api.setEN(false) // 0 = Tiếng Việt
+        let ver = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.0"
+        api.setVer(ver)
     }
 
     // ── Format date string — mirrors fmtDate() in HTML ──
@@ -112,93 +103,33 @@ class KeyAuthManager: ObservableObject {
         isAuthenticating = true
         errorMessage     = nil
 
-        let key = (inputKey ?? savedKey)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
+        Self.configurePPAPIKey()
 
-        guard !key.isEmpty else {
-            isAuthorized = false
-            isAuthenticating = false
-            return
-        }
-        guard let url = endpoint(for: key) else {
-            errorMessage     = "Lỗi cấu hình API"
-            isAuthenticating = false
-            return
+        if let inputKey, !inputKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            UIPasteboard.general.string = inputKey.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        var req = URLRequest(url: url)
-        req.httpMethod  = "GET"
-        req.timeoutInterval = 20
-        req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("ThreeOneOSFive/1.0 CFNetwork", forHTTPHeaderField: "User-Agent")
-        req.cachePolicy = .reloadIgnoringLocalCacheData
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.verificationGeneration == generation else { return }
+            let api = PPAPIKey.shared()
 
-        let cfg  = URLSessionConfiguration.ephemeral
-        cfg.timeoutIntervalForRequest  = 20
-        cfg.timeoutIntervalForResource = 35
-        cfg.waitsForConnectivity       = true
+            api.loading { [weak self] in
+                DispatchQueue.main.async {
+                    guard let self, self.verificationGeneration == generation else { return }
+                    self.isAuthenticating = false
+                    self.isAuthorized     = true
 
-        let delegate = _RedirectDelegate()
-        let session  = URLSession(configuration: cfg, delegate: delegate, delegateQueue: nil)
-        verificationSession = session
+                    let deviceKey = api.getDeviceKey() ?? ""
+                    let expire    = api.getKeyExpire() ?? ""
 
-        let task = session.dataTask(with: req) { [weak self] data, response, error in
-            DispatchQueue.main.async {
-                guard let self, self.verificationGeneration == generation else { return }
-                self.verificationTask = nil
-                self.verificationSession?.finishTasksAndInvalidate()
-                self.verificationSession = nil
-                self.isAuthenticating = false
-
-                // ── Network errors ──
-                if let err = error as NSError? {
-                    switch err.code {
-                    case NSURLErrorHTTPTooManyRedirects:
-                        self.errorMessage = "Server chuyển hướng quá nhiều lần — liên hệ Admin"
-                    case NSURLErrorTimedOut:
-                        self.errorMessage = "Hết thời gian kết nối — kiểm tra mạng"
-                    case NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost:
-                        self.errorMessage = "Không có kết nối Internet"
-                    case NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost:
-                        self.errorMessage = "Không thể kết nối máy chủ"
-                    default:
-                        self.errorMessage = "Lỗi kết nối máy chủ"
-                    }
-                    return
-                }
-
-                // ── Parse JSON ──
-                guard let data,
-                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-                else {
-                    self.errorMessage = "Phản hồi máy chủ không hợp lệ"
-                    return
-                }
-
-                // ── API contract (mirrors checkkey.html render()) ──
-                let valid    = json["valid"]      as? Bool   ?? false
-                let expiresAt = json["expires_at"] as? String
-                let appName  = json["app_name"]   as? String ?? "Thành Viên VIP"
-                let lifetime = json["lifetime"]   as? Bool   ?? false
-                let note     = json["note"]        as? String ?? ""
-                let message  = json["message"]     as? String
-                    ?? json["msg"]    as? String
-                    ?? json["error"]  as? String
-
-                if valid {
-                    self.isAuthorized   = true
-                    self.savedKey       = key
-                    self.keyName        = appName
-                    self.keyLifetime    = lifetime
-                    self.keyNote        = note
-                    self.keyDuration    = lifetime ? "Vĩnh viễn" : "Có thời hạn"
-                    self.keyExpiry      = lifetime
-                        ? "Vĩnh viễn"
-                        : KeyAuthManager.formatDate(expiresAt)
-                    self.keyExpiryTimestamp = lifetime
-                        ? 0
-                        : (KeyAuthManager.parseDate(expiresAt)?.timeIntervalSince1970 ?? 0)
+                    self.savedKey   = deviceKey
+                    self.keyName    = "Duy Mạnh Store VIP"
+                    self.keyNote    = "PPAPIKey System"
+                    let isLifetime  = expire.isEmpty || expire.lowercased().contains("vĩnh viễn") || expire.lowercased().contains("không giới hạn")
+                    self.keyLifetime = isLifetime
+                    self.keyDuration = isLifetime ? "Vĩnh viễn" : "Có thời hạn"
+                    self.keyExpiry   = isLifetime ? "Vĩnh viễn" : expire
+                    self.keyExpiryTimestamp = isLifetime ? 0 : (Self.parseDate(expire)?.timeIntervalSince1970 ?? 0)
                     self.isPatchVisible = true
                     self.errorMessage   = nil
                     self.isActivationTransitioning = true
@@ -207,20 +138,9 @@ class KeyAuthManager: ObservableObject {
                     DispatchQueue.main.asyncAfter(deadline: .now() + transitionDuration) { [weak self] in
                         self?.isActivationTransitioning = false
                     }
-                } else {
-                    self.isAuthorized = false
-                    self.savedKey     = ""
-                    self.keyName      = ""
-                    self.keyDuration  = ""
-                    self.keyExpiry    = ""
-                    self.keyNote      = ""
-                    self.keyLifetime  = false
-                    self.errorMessage = message ?? "Key không hợp lệ hoặc đã hết hạn"
                 }
             }
         }
-        verificationTask = task
-        task.resume()
     }
 
     func enterMaintenanceMode() {
@@ -254,6 +174,8 @@ class KeyAuthManager: ObservableObject {
         verificationTask = nil
         verificationSession?.invalidateAndCancel()
         verificationSession = nil
+
+        PPAPIKey.shared().exitKey { _ in }
 
         ["saved_key","key_name","key_duration","key_expiry","key_note","key_expiry_timestamp"].forEach {
             UserDefaults.standard.removeObject(forKey: $0)
@@ -518,7 +440,7 @@ struct KeyActivationView: View {
                     Text("Kiểm tra License Key")
                         .font(.system(size: 19, weight: .bold))
                         .foregroundColor(primaryTextColor)
-                    Text("IHAX")
+                    Text("Duy Mạnh Store")
                         .font(.system(size: 12.5))
                         .foregroundColor(secondaryTextColor)
                 }
@@ -695,10 +617,10 @@ struct KeyActivationView: View {
                         .scaleEffect(0.85)
                         .transition(.opacity)
                 } else {
-                    Image(systemName: "magnifyingglass")
+                    Image(systemName: "key.fill")
                         .font(.system(size: 15, weight: .bold))
                 }
-                Text(authManager.isAuthenticating ? "Đang kiểm tra..." : "Kích Hoạt Key")
+                Text(authManager.isAuthenticating ? "Đang xác thực PPAPIKey..." : "Kích Hoạt Key")
                     .fontWeight(.bold)
                     .font(.system(size: 14.5))
             }
@@ -725,8 +647,8 @@ struct KeyActivationView: View {
             .onChanged { _ in btnPressed = true }
             .onEnded   { _ in btnPressed = false }
         )
-        .disabled(authManager.isAuthenticating || inputKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        .opacity(inputKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.62 : 1)
+        .disabled(authManager.isAuthenticating)
+        .opacity(authManager.isAuthenticating ? 0.62 : 1)
     }
 
     // ── Loading row ──
@@ -851,9 +773,9 @@ struct KeyActivationView: View {
     private func submit() {
         focused = false
         let trimmed = inputKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !authManager.isAuthenticating else { return }
+        guard !authManager.isAuthenticating else { return }
         withAnimation(.easeOut(duration: 0.18)) {
-            authManager.verifyKey(inputKey: trimmed)
+            authManager.verifyKey(inputKey: trimmed.isEmpty ? nil : trimmed)
         }
     }
 }

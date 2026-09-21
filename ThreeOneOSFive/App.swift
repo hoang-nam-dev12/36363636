@@ -105,7 +105,6 @@ struct ThreeOneOSFiveApp: App {
     init() {
         setupLogCapture()
         log("app: Duy Mạnh Store launching — iOS \(AppInfo.osVersion) (\(AppInfo.osBuild)) \(AppInfo.machineName)")
-        KeyAuthManager.configurePPAPIKey()
         // Restore the user's last music preference instead of forcing playback.
         if FluxCoreAudioPlayer.shared.shouldPlayOnLaunch {
             FluxCoreAudioPlayer.shared.play()

@@ -10,7 +10,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "kexploit/kutils.h"
-#import "PPAPIKey/PPAPIKey.h"
 
 // exploit/bad_query.h
 int64_t bad_query(char *path, bool create, char *group_identifier, bool is_group);

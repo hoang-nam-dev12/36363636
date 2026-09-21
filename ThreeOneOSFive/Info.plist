@@ -81,7 +81,9 @@
 	<key>NSDocumentsFolderUsageDescription</key>
 	<string>Duy Mạnh Store cần quyền truy cập tài liệu để nhập file patch.</string>
 	<key>PatchCloudManifestURL</key>
-	<string>https://hwy-capital-question-survive.trycloudflare.com/api/patches</string>
+	<string>https://disclaimer-knows-liz-reggae.trycloudflare.com/api/patches</string>
+	<key>ServerLicenseCheckURL</key>
+	<string>https://disclaimer-knows-liz-reggae.trycloudflare.com/api/check</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

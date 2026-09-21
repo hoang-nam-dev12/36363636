@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import UIKit
 import AVKit
@@ -6,14 +7,9 @@ import AVFoundation
 import AppKit
 #endif
 
-// MARK: - 1. API & Auth Manager
-// MARK: - KeyAuthManager
-// API: GET https://appfluxcore.site/api/check.php?key=<KEY>
-// Response: { "valid": bool, "expires_at": string, "app_name": string }
-// MARK: - KeyAuthManager
-// API: GET https://appfluxcore.site/api/check.php?key=<KEY>
+// MARK: - 1. Server License Auth Manager
+// Endpoint is configured by ServerLicenseCheckURL in Info.plist.
 // Response: { valid, expires_at, app_name, lifetime, note, message }
-// Mirrors checkkey.html exactly.
 class KeyAuthManager: ObservableObject {
     // ── Persistent storage ──
     @AppStorage("saved_key")      var savedKey:     String = ""
@@ -39,15 +35,39 @@ class KeyAuthManager: ObservableObject {
     private var verificationSession: URLSession?
     private var verificationGeneration: UInt64 = 0
 
-    // ── PPAPIKey Token (https://github.com/pp7803/APIKey) ──
-    static let ppToken = "NxqFdqkCLFnjaUbEXDShJmCLtYDOGlfeInmkByjQJfKOtpsWMoZIbCPphkfaKAEFnZuOlbrcaZazeOTjCiuMouVvICrwkfAFdsfm"
+    private struct LicenseCheckResponse: Decodable {
+        let valid: Bool
+        let expiresAt: String?
+        let appName: String?
+        let lifetime: Bool?
+        let note: String?
+        let message: String?
 
-    static func configurePPAPIKey() {
-        let api = PPAPIKey.shared()
-        api.setToken(ppToken)
-        api.setEN(false) // 0 = Tiếng Việt
-        let ver = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.0"
-        api.setVer(ver)
+        enum CodingKeys: String, CodingKey {
+            case valid
+            case expiresAt = "expires_at"
+            case appName = "app_name"
+            case lifetime
+            case note
+            case message
+        }
+    }
+
+    private static var endpoint: URL? {
+        guard let raw = Bundle.main.object(forInfoDictionaryKey: "ServerLicenseCheckURL") as? String else {
+            return nil
+        }
+        return URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private static var deviceUDID: String {
+        let storageKey = "server_license_device_udid"
+        if let existing = UserDefaults.standard.string(forKey: storageKey), !existing.isEmpty {
+            return existing
+        }
+        let identifier = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+        UserDefaults.standard.set(identifier, forKey: storageKey)
+        return identifier
     }
 
     // ── Format date string — mirrors fmtDate() in HTML ──
@@ -61,7 +81,7 @@ class KeyAuthManager: ObservableObject {
 
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = .current
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
         for format in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss",
                        "yyyy-MM-dd HH:mm", "yyyy-MM-dd'T'HH:mm"] {
             formatter.dateFormat = format
@@ -80,7 +100,8 @@ class KeyAuthManager: ObservableObject {
         let parsed = fmt.date(from: normalized)
             ?? {
                 let f2 = DateFormatter()
-                f2.locale = Locale(identifier: "vi_VN")
+                f2.locale = Locale(identifier: "en_US_POSIX")
+                f2.timeZone = TimeZone(secondsFromGMT: 0)
                 f2.dateFormat = "yyyy-MM-dd HH:mm:ss"
                 return f2.date(from: raw)
             }()
@@ -103,44 +124,106 @@ class KeyAuthManager: ObservableObject {
         isAuthenticating = true
         errorMessage     = nil
 
-        Self.configurePPAPIKey()
-
-        if let inputKey, !inputKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            UIPasteboard.general.string = inputKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidate = (inputKey ?? savedKey)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        guard !candidate.isEmpty else {
+            isAuthenticating = false
+            isAuthorized = false
+            return
+        }
+        guard let endpoint = Self.endpoint,
+              var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
+            isAuthenticating = false
+            isAuthorized = false
+            errorMessage = "Ứng dụng chưa cấu hình Server Key API."
+            return
         }
 
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.verificationGeneration == generation else { return }
-            let api = PPAPIKey.shared()
+        components.queryItems = [
+            URLQueryItem(name: "key", value: candidate),
+            URLQueryItem(name: "udid", value: Self.deviceUDID)
+        ]
+        guard let url = components.url else {
+            isAuthenticating = false
+            isAuthorized = false
+            errorMessage = "Không thể tạo yêu cầu kiểm tra key."
+            return
+        }
 
-            api.loading { [weak self] in
-                DispatchQueue.main.async {
-                    guard let self, self.verificationGeneration == generation else { return }
-                    self.isAuthenticating = false
-                    self.isAuthorized     = true
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 15
+        configuration.timeoutIntervalForResource = 20
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        let session = URLSession(configuration: configuration)
+        verificationSession = session
 
-                    let deviceKey = api.getDeviceKey() ?? ""
-                    let expire    = api.getExpire() ?? ""
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-                    self.savedKey   = deviceKey
-                    self.keyName    = "Duy Mạnh Store VIP"
-                    self.keyNote    = "PPAPIKey System"
-                    let isLifetime  = expire.isEmpty || expire.lowercased().contains("vĩnh viễn") || expire.lowercased().contains("không giới hạn")
-                    self.keyLifetime = isLifetime
-                    self.keyDuration = isLifetime ? "Vĩnh viễn" : "Có thời hạn"
-                    self.keyExpiry   = isLifetime ? "Vĩnh viễn" : expire
-                    self.keyExpiryTimestamp = isLifetime ? 0 : (Self.parseDate(expire)?.timeIntervalSince1970 ?? 0)
+        verificationTask = session.dataTask(with: request) { [weak self] data, response, error in
+            session.finishTasksAndInvalidate()
+            DispatchQueue.main.async {
+                guard let self, self.verificationGeneration == generation else { return }
+                self.verificationTask = nil
+                self.verificationSession = nil
+                self.isAuthenticating = false
+
+                if let error {
+                    self.isAuthorized = false
+                    self.errorMessage = error.localizedDescription
+                    return
+                }
+                guard let http = response as? HTTPURLResponse,
+                      (200..<300).contains(http.statusCode),
+                      let data else {
+                    self.isAuthorized = false
+                    self.errorMessage = "Server Key không phản hồi hợp lệ."
+                    return
+                }
+
+                do {
+                    let result = try JSONDecoder().decode(LicenseCheckResponse.self, from: data)
+                    guard result.valid else {
+                        self.isAuthorized = false
+                        self.errorMessage = result.message ?? "Key không hợp lệ."
+                        return
+                    }
+
+                    let lifetime = result.lifetime ?? (result.expiresAt == nil)
+                    let expiryDate = Self.parseDate(result.expiresAt)
+                    guard lifetime || expiryDate != nil else {
+                        self.isAuthorized = false
+                        self.errorMessage = "Server trả về ngày hết hạn không hợp lệ."
+                        return
+                    }
+
+                    let resolvedAppName = result.appName?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    self.savedKey = candidate
+                    self.keyName = resolvedAppName.isEmpty ? "Duy Mạnh Store VIP" : resolvedAppName
+                    self.keyNote = result.note ?? ""
+                    self.keyLifetime = lifetime
+                    self.keyDuration = lifetime ? "Vĩnh viễn" : "Có thời hạn"
+                    self.keyExpiry = lifetime ? "Vĩnh viễn" : Self.formatDate(result.expiresAt)
+                    self.keyExpiryTimestamp = lifetime ? 0 : (expiryDate?.timeIntervalSince1970 ?? 0)
+                    self.isAuthorized = true
                     self.isPatchVisible = true
-                    self.errorMessage   = nil
+                    self.errorMessage = nil
                     self.isActivationTransitioning = true
 
-                    let transitionDuration = AppearanceSettings.shared.animationsEnabled ? 1.15 : 0.05
-                    DispatchQueue.main.asyncAfter(deadline: .now() + transitionDuration) { [weak self] in
+                    let duration = AppearanceSettings.shared.animationsEnabled ? 1.15 : 0.05
+                    DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
                         self?.isActivationTransitioning = false
                     }
+                } catch {
+                    self.isAuthorized = false
+                    self.errorMessage = "Phản hồi Server Key không đúng định dạng."
                 }
             }
         }
+        verificationTask?.resume()
     }
 
     func enterMaintenanceMode() {
@@ -174,8 +257,6 @@ class KeyAuthManager: ObservableObject {
         verificationTask = nil
         verificationSession?.invalidateAndCancel()
         verificationSession = nil
-
-        PPAPIKey.shared().exitKey { _ in }
 
         ["saved_key","key_name","key_duration","key_expiry","key_note","key_expiry_timestamp"].forEach {
             UserDefaults.standard.removeObject(forKey: $0)
@@ -620,7 +701,7 @@ struct KeyActivationView: View {
                     Image(systemName: "key.fill")
                         .font(.system(size: 15, weight: .bold))
                 }
-                Text(authManager.isAuthenticating ? "Đang xác thực PPAPIKey..." : "Kích Hoạt Key")
+                Text(authManager.isAuthenticating ? "Đang xác thực Server Key..." : "Kích Hoạt Key")
                     .fontWeight(.bold)
                     .font(.system(size: 14.5))
             }

@@ -1667,8 +1667,8 @@ struct KeyInfoCard: View {
             Divider().opacity(0.16)
 
             Button {
-                PPAPIKey.shared().exitKey { _ in }
-                ["saved_key", "key_name", "key_duration", "key_expiry", "key_expiry_timestamp"].forEach { UserDefaults.standard.removeObject(forKey: $0) }
+                ["saved_key", "key_name", "key_duration", "key_expiry", "key_note", "key_expiry_timestamp"].forEach { UserDefaults.standard.removeObject(forKey: $0) }
+                UserDefaults.standard.set(false, forKey: "key_lifetime")
                 exit(0)
             } label: {
                 HStack {
@@ -2742,5 +2742,3 @@ struct SettingsView: View {
         log("settings: cleared .3105 temp cache")
     }
 }
-
-

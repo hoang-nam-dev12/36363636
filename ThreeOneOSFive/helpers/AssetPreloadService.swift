@@ -43,7 +43,7 @@ actor AssetPreloadService {
         let filename = asset.key == "audio.background"
             ? "audio_background_v2"
             : asset.key.replacingOccurrences(of: ".", with: "_")
-        cacheDirectory.appendingPathComponent(
+        return cacheDirectory.appendingPathComponent(
             "\(filename).\(asset.fileExtension)"
         )
     }

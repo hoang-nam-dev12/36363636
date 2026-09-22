@@ -433,7 +433,8 @@ struct AppLogo: View {
 
     var body: some View {
         Group {
-            if let icon = UIImage(named: "AppIcon60x60")
+            if let icon = UIImage(named: "NDMLogo")
+                ?? UIImage(named: "AppIcon60x60")
                 ?? Bundle.main.path(forResource: "AppIcon60x60@2x", ofType: "png").flatMap(UIImage.init(contentsOfFile:))
                 ?? UIImage(named: "AppIcon") {
                 Image(uiImage: icon)
@@ -477,290 +478,52 @@ private struct DeveloperPressStyle: ButtonStyle {
 
 struct DeveloperInfoCard: View {
     @ObservedObject private var appearance = AppearanceSettings.shared
-    let action: () -> Void
+    var size: CGFloat = 88
+    var action: (() -> Void)? = nil
 
-    /// Single reactive source of truth for all Developer Info buttons.
-    private var transparency: Double {
-        DeveloperInfoAppearance.normalized(appearance.developerInfoOpacity)
-    }
-
-    private var borderOpacity: Double {
-        min(max(appearance.developerInfoBorderOpacity, 0), 1)
-    }
-
-    private var borderWidth: CGFloat {
-        CGFloat(min(max(appearance.developerInfoBorderWidth, 0), 4))
-    }
-
-    private var cornerRadius: CGFloat {
-        CGFloat(min(max(appearance.buttonCornerRadius, 0), 30))
+    init(size: CGFloat = 88, action: (() -> Void)? = nil) {
+        self.size = size
+        self.action = action
     }
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                        .opacity(transparency)
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                                .fill(Color.white.opacity(0.16 * transparency))
-                        }
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                                .stroke(Color.clear, lineWidth: 0)
-                        }
-
-                    Circle()
-                        .stroke(Color.clear, lineWidth: 0)
-                        .scaleEffect(1.20)
-                        .opacity(0.65)
-                    AsyncImage(url: URL(string: "https://i.ibb.co/4wtdVv1T/IMG-8588.jpg")) { phase in
-                        if let image = phase.image {
-                            image
-                                .resizable()
-                                .scaledToFill()
-                        } else {
-                            Image(systemName: "info.circle.fill")
-                                .font(.system(size: 20, weight: .semibold))
-                                .foregroundStyle(AppTheme.accent.opacity(0.70 + (0.30 * transparency)))
-                        }
-                    }
-                    .frame(width: 34, height: 34)
-                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    .shadow(color: AppTheme.accent.opacity(0.55), radius: 9)
+        HStack {
+            Spacer()
+            Group {
+                if let img = UIImage(named: "NDMLogo")
+                    ?? UIImage(named: "AppIcon60x60")
+                    ?? UIImage(named: "AppIcon") {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFit()
+                } else {
+                    Image(systemName: "shield.fill")
+                        .font(.system(size: size * 0.5))
+                        .foregroundStyle(Color(red: 1.0, green: 0.35, blue: 0.72))
                 }
-                .frame(width: 48, height: 48)
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Developer Info")
-                        .font(.system(size: 16, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.55 + (0.40 * transparency)))
-
-                    Text("NHÓM TELEGRAM")
-                        .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-                        .tracking(0.7)
-                        .foregroundStyle(.white.opacity(0.22 + (0.58 * transparency)))
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 8)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.24 + (0.52 * transparency)))
             }
-            .padding(.horizontal, 17)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity, minHeight: 82)
-            .contentShape(Rectangle())
-            .background {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    // The material alpha is driven directly by Dynamic Transparency.
-                    .fill(.ultraThinMaterial)
-                    .opacity(transparency)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .fill(Color.white.opacity(0.10 * transparency))
-                    }
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
                     .stroke(
-                        borderWidth > 0 && borderOpacity > 0
-                            ? appearance.resolvedBorderColor.opacity(borderOpacity)
-                            : Color.clear,
-                        lineWidth: borderWidth
+                        LinearGradient(
+                            colors: [
+                                Color(red: 1.0, green: 0.40, blue: 0.75).opacity(0.65),
+                                Color(red: 0.85, green: 0.30, blue: 0.90).opacity(0.35),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.5
                     )
-            }
-            .shadow(color: .black.opacity(0.22 * transparency), radius: 14 * transparency, y: 7 * transparency)
+            )
+            .shadow(color: Color(red: 1.0, green: 0.25, blue: 0.65).opacity(0.45), radius: 16, y: 6)
+            Spacer()
         }
-        .buttonStyle(DeveloperPressStyle())
-        .animation(.easeInOut(duration: 0.24), value: transparency)
-        .accessibilityLabel("Developer Info")
-        .accessibilityHint("Open developer contact and support channels")
+        .padding(.vertical, 8)
     }
 }
 
-struct DeveloperInfoContent: View {
-    @ObservedObject private var appearance = AppearanceSettings.shared
-    let onDismiss: () -> Void
 
-    /// The sheet intentionally stays slightly denser than the Developer Info button.
-    private var transparency: Double {
-        min(max(appearance.dynamicOpacity, 0.05), 1.0)
-    }
-
-    /// Menu is intentionally denser than the button while remaining driven by
-    /// the exact same Dynamic Transparency value.
-    private var menuOpacity: Double {
-        min(1.0, transparency * 1.18)
-    }
-
-    private var menuWhiteOpacity: Double {
-        0.18 * menuOpacity
-    }
-
-    private var menuDarkening: Double {
-        0.30 * menuOpacity
-    }
-
-    private var rowWhiteOpacity: Double {
-        0.14 * menuOpacity
-    }
-
-    private struct DevLink: Identifiable {
-        let id = UUID()
-        let icon: String
-        let title: String
-        let subtitle: String
-        let url: String
-    }
-
-    private let links: [DevLink] = [
-        DevLink(icon: "person.3.fill", title: "Nhóm Telegram", subtitle: "t.me/dmanhchat", url: "https://t.me/dmanhchat"),
-        DevLink(icon: "person.crop.circle.fill", title: "Admin Telegram", subtitle: "t.me/ndmprofile", url: "https://t.me/ndmprofile"),
-        DevLink(icon: "hammer.fill", title: "DEV", subtitle: "t.me/aieqt", url: "https://t.me/aieqt")
-    ]
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Capsule()
-                .fill(Color.white.opacity(0.30 + (0.38 * transparency)))
-                .frame(width: 46, height: 5)
-                .padding(.top, 14)
-                .padding(.bottom, 22)
-
-            HStack(spacing: 12) {
-                Image(systemName: "info.circle.fill")
-                    .foregroundStyle(.white.opacity(0.92 + (0.06 * transparency)))
-                    .font(.system(size: 22, weight: .semibold))
-
-                Text("Thông tin DEV APP")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.90 + (0.08 * transparency)))
-
-                Spacer()
-
-                Button(action: onDismiss) {
-                    ZStack {
-                        Circle().fill(Color.black.opacity(0.28 + (0.22 * transparency)))
-                        Circle().stroke(Color.clear, lineWidth: 0)
-                        Image(systemName: "xmark")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.78 + (0.16 * transparency)))
-                    }
-                    .frame(width: 44, height: 44)
-                }
-                .buttonStyle(DeveloperPressStyle())
-                .accessibilityLabel("Đóng")
-            }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 20)
-
-            Rectangle()
-                .fill(Color.white.opacity(0.12 + (0.16 * transparency)))
-                .frame(height: 1)
-                .padding(.horizontal, 24)
-
-            VStack(spacing: 10) {
-                ForEach(links) { link in
-                    Button {
-                        guard let url = URL(string: link.url) else { return }
-                        UIApplication.shared.open(url)
-                    } label: {
-                        HStack(spacing: 16) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                                    .fill(Color.black.opacity(0.24 + (0.20 * transparency)))
-                                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-                                    .overlay {
-                                        RoundedRectangle(cornerRadius: 15, style: .continuous)
-                                            .fill(Color.white.opacity(rowWhiteOpacity * 0.18))
-                                    }
-
-                                Image(systemName: link.icon)
-                                    .font(.system(size: 20, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.94))
-                            }
-                            .frame(width: 56, height: 56)
-
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(link.title)
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundStyle(.white.opacity(0.92 + (0.06 * transparency)))
-
-                                Text(link.subtitle)
-                                    .font(.system(size: 12.5, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.46 + (0.30 * transparency)))
-                                    .lineLimit(1)
-                            }
-
-                            Spacer(minLength: 8)
-
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.64 + (0.28 * transparency)))
-                        }
-                        .padding(.horizontal, 18)
-                        .frame(maxWidth: .infinity, minHeight: 80)
-                        .background {
-                            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                .fill(.thinMaterial)
-                                // Rows are deliberately denser than the white frosted menu.
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                        .fill(Color.black.opacity(0.18 + (0.20 * transparency)))
-                                }
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                        .fill(Color.white.opacity(rowWhiteOpacity * 0.28))
-                                }
-                        }
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                .stroke(Color.clear, lineWidth: 0)
-                        }
-                        .shadow(color: .black.opacity(0.16 + (0.14 * transparency)), radius: 10, y: 5)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(DeveloperPressStyle())
-                    .accessibilityLabel("\(link.title), \(link.subtitle)")
-                    .accessibilityHint("Mở liên kết")
-                }
-            }
-            .padding(.horizontal, 24)
-            .padding(.top, 20)
-            .padding(.bottom, 14)
-        }
-        .frame(maxWidth: .infinity)
-        .background {
-            RoundedRectangle(cornerRadius: 34, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .opacity(menuOpacity)
-                // Colorless white frosted glass. The Dynamic Transparency slider controls its density.
-                .overlay {
-                    RoundedRectangle(cornerRadius: 34, style: .continuous)
-                        .fill(Color.white.opacity(menuWhiteOpacity))
-                }
-                // Keep the Developer menu slightly darker/stronger than the external button.
-                .overlay {
-                    RoundedRectangle(cornerRadius: 34, style: .continuous)
-                        .fill(Color.black.opacity(menuDarkening))
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 34, style: .continuous)
-                        .fill(.regularMaterial)
-                        .opacity(0.08 + (0.16 * transparency))
-                }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 34, style: .continuous)
-                .stroke(Color.clear, lineWidth: 0)
-        }
-        .shadow(color: .black.opacity(0.20 + (0.20 * transparency)), radius: 24, y: 10)
-        .animation(.easeInOut(duration: 0.28), value: transparency)
-    }
-}

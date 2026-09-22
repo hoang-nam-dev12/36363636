@@ -242,6 +242,17 @@ final class OnlineFileFetcher: ObservableObject {
     private var localPackageIDByIdentity: [String: String] = [:]
     private var hasPreparedLocalIndex = false
 
+    private lazy var manifestSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForResource = 35
+        config.waitsForConnectivity = true
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.urlCache = nil
+        config.httpMaximumConnectionsPerHost = 1
+        return URLSession(configuration: config)
+    }()
+
     private lazy var downloadSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 45
@@ -260,7 +271,7 @@ final class OnlineFileFetcher: ObservableObject {
     }
 
     func fetchServerFiles() async {
-        guard let url = manifestURL else {
+        guard let baseURL = manifestURL else {
             onlineFiles = []
             lastFetchSucceeded = false
             log("online-files: PatchCloudManifestURL is missing or invalid")
@@ -269,33 +280,77 @@ final class OnlineFileFetcher: ObservableObject {
         isLoading = true
         lastFetchSucceeded = false
         defer { isLoading = false }
-        do {
-            var request = URLRequest(url: url)
-            request.httpMethod = "GET"
-            request.timeoutInterval = 15
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200...299).contains(httpResponse.statusCode) else {
-                throw URLError(.badServerResponse)
-            }
-            let decoded = try JSONDecoder().decode([OnlineFileItem].self, from: data)
-            var seenPackageIDs = Set<String>()
-            let activeFiles = decoded
-                .filter { $0.status }
-                .sorted { $0.created_at > $1.created_at }
-                .filter { file in
-                    guard let rawID = file.packageID,
-                          let packageID = UUID(uuidString: rawID)?.uuidString.lowercased() else {
-                        return true
-                    }
-                    return seenPackageIDs.insert(packageID).inserted
+
+        for attempt in 1...3 {
+            if Task.isCancelled { return }
+            do {
+                guard var components = URLComponents(
+                    url: baseURL,
+                    resolvingAgainstBaseURL: false
+                ) else {
+                    throw URLError(.badURL)
                 }
-            ServerPatchMetadataStore.replace(with: activeFiles)
-            onlineFiles = activeFiles
-            lastFetchSucceeded = true
-        } catch {
-            log("online-files: fetch failed – \(error.localizedDescription)")
+                var queryItems = components.queryItems ?? []
+                queryItems.removeAll { $0.name == "_sync" }
+                queryItems.append(
+                    URLQueryItem(
+                        name: "_sync",
+                        value: "\(Int(Date().timeIntervalSince1970))-\(attempt)"
+                    )
+                )
+                components.queryItems = queryItems
+                guard let requestURL = components.url else {
+                    throw URLError(.badURL)
+                }
+
+                var request = URLRequest(
+                    url: requestURL,
+                    cachePolicy: .reloadIgnoringLocalCacheData,
+                    timeoutInterval: 20
+                )
+                request.httpMethod = "GET"
+                request.setValue("application/json", forHTTPHeaderField: "Accept")
+                request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
+                request.setValue("no-cache", forHTTPHeaderField: "Pragma")
+
+                let (data, response) = try await manifestSession.data(for: request)
+                guard let httpResponse = response as? HTTPURLResponse,
+                      (200...299).contains(httpResponse.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+                let decoded = try JSONDecoder().decode([OnlineFileItem].self, from: data)
+                var seenPackageIDs = Set<String>()
+                let activeFiles = decoded
+                    .filter { $0.status }
+                    .sorted { $0.created_at > $1.created_at }
+                    .filter { file in
+                        guard let rawID = file.packageID,
+                              let packageID = UUID(uuidString: rawID)?.uuidString.lowercased() else {
+                            return true
+                        }
+                        return seenPackageIDs.insert(packageID).inserted
+                    }
+                ServerPatchMetadataStore.replace(with: activeFiles)
+                onlineFiles = activeFiles
+                lastFetchSucceeded = true
+                log("online-files: synced \(activeFiles.count) patch(es) from server")
+                return
+            } catch is CancellationError {
+                return
+            } catch {
+                log("online-files: attempt \(attempt)/3 failed – \(error.localizedDescription)")
+                if attempt < 3 {
+                    try? await Task.sleep(for: .milliseconds(450 * attempt))
+                }
+            }
         }
+    }
+
+    func recordSuccessfulImport(_ file: OnlineFileItem, packageID: UUID?) {
+        if let packageID {
+            ServerPatchMetadataStore.associate(file, packageID: packageID)
+        }
+        markServerManaged(file)
     }
 
     /// Synchronizes every active server patch for the launch gate.
@@ -618,12 +673,11 @@ final class OnlineFileFetcher: ObservableObject {
             }
             let checksumKey = "PatchProjects.serverManagedSHA256.v1"
             let checksums = UserDefaults.standard.dictionary(forKey: checksumKey) as? [String: String] ?? [:]
-            // Existing installs created by older app versions have no saved
-            // fingerprint. Accept them once; markServerManaged migrates the
-            // current checksum after this successful pass.
-            guard let installedChecksum = checksums[packageID] else {
-                return true
-            }
+            // An older app may have installed this package without persisting
+            // its fingerprint. Treat that state as unknown and download once;
+            // accepting it would incorrectly mark an outdated local package as
+            // identical to the newest server revision.
+            guard let installedChecksum = checksums[packageID] else { return false }
             return installedChecksum == expectedChecksum
         }
 
@@ -1072,9 +1126,8 @@ struct OnlineFilesSheetView: View {
                 return
             }
 
-            if let packageID = try? PatchPackageCodec.inspect(data).packageID {
-                ServerPatchMetadataStore.associate(file, packageID: packageID)
-            }
+            let packageID = try? PatchPackageCodec.inspect(data).packageID
+            fetcher.recordSuccessfulImport(file, packageID: packageID)
 
             log("batch-download: imported \(finalName)")
             updateBatch(id: file.id, fraction: 1.0, status: .done)
@@ -1199,9 +1252,8 @@ struct OnlineFilesSheetView: View {
                 guard imported else {
                     throw PatchPackageError.invalidPasswordOrCorruptedPackage
                 }
-                if let packageID = try? PatchPackageCodec.inspect(data).packageID {
-                    ServerPatchMetadataStore.associate(file, packageID: packageID)
-                }
+                let packageID = try? PatchPackageCodec.inspect(data).packageID
+                fetcher.recordSuccessfulImport(file, packageID: packageID)
                 withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) { showSuccessToast = true }
                 try? await Task.sleep(nanoseconds: 2_500_000_000)
                 withAnimation(.easeOut(duration: 0.5)) { showSuccessToast = false }
@@ -1297,8 +1349,24 @@ struct PatchProjectsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .task {
                 // Load the local library first so existing patches are visible
-                // immediately, then start AUTO against this same store.
+                // immediately, then keep the server manifest fresh while this
+                // screen is alive. trigger() coalesces overlapping refreshes.
                 store.reload()
+                AutoPatchEngine.shared.configure(store: store)
+                AutoPatchEngine.shared.trigger()
+
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(45))
+                    guard !Task.isCancelled else { break }
+                    AutoPatchEngine.shared.configure(store: store)
+                    AutoPatchEngine.shared.trigger()
+                }
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(
+                    for: UIApplication.didBecomeActiveNotification
+                )
+            ) { _ in
                 AutoPatchEngine.shared.configure(store: store)
                 AutoPatchEngine.shared.trigger()
             }

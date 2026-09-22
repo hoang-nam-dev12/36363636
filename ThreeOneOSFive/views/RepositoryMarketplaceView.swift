@@ -391,6 +391,7 @@ struct RepositoryPackageDetailView: View {
             .scrollIndicators(.hidden)
             .background(Color(uiColor: .systemGroupedBackground))
             .onAppear {
+                patchStore.reload()
                 scrollToInformationIfNeeded(using: proxy)
             }
         }

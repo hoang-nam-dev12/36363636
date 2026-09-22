@@ -75,7 +75,13 @@ private enum ServerPatchMetadataStore {
         let category: String
     }
 
+    private final class MemoryCache: @unchecked Sendable {
+        let lock = NSLock()
+        var records: [Record]?
+    }
+
     private static let storageKey = "PatchProjects.serverMetadata.v1"
+    private static let memoryCache = MemoryCache()
 
     static func replace(with files: [OnlineFileItem]) {
         let previous = Dictionary(uniqueKeysWithValues: load().map { ($0.serverID, $0) })
@@ -132,6 +138,18 @@ private enum ServerPatchMetadataStore {
         }
     }
 
+    static func displayTitle(for item: PatchLibraryItem) -> String {
+        if let title = record(for: item)?.title.trimmingCharacters(in: .whitespacesAndNewlines),
+           !title.isEmpty {
+            return title
+        }
+        if let projectName = item.project?.name.trimmingCharacters(in: .whitespacesAndNewlines),
+           !projectName.isEmpty {
+            return projectName
+        }
+        return item.packageURL.deletingPathExtension().lastPathComponent
+    }
+
     private static func record(from file: OnlineFileItem) -> Record? {
         guard let game = normalizedGame(file.game),
               let category = PatchType.serverCategory(file.category) else {
@@ -148,16 +166,28 @@ private enum ServerPatchMetadataStore {
     }
 
     private static func load() -> [Record] {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let records = try? JSONDecoder().decode([Record].self, from: data) else {
-            return []
+        memoryCache.lock.lock()
+        defer { memoryCache.lock.unlock() }
+        if let records = memoryCache.records {
+            return records
         }
+        let records: [Record]
+        if let data = UserDefaults.standard.data(forKey: storageKey),
+           let decoded = try? JSONDecoder().decode([Record].self, from: data) {
+            records = decoded
+        } else {
+            records = []
+        }
+        memoryCache.records = records
         return records
     }
 
     private static func save(_ records: [Record]) {
         guard let data = try? JSONEncoder().encode(records) else { return }
         UserDefaults.standard.set(data, forKey: storageKey)
+        memoryCache.lock.lock()
+        memoryCache.records = records
+        memoryCache.lock.unlock()
     }
 
     private static func replacingPackageID(in record: Record, with packageID: String) -> Record {
@@ -209,6 +239,18 @@ final class OnlineFileFetcher: ObservableObject {
     @Published var onlineFiles: [OnlineFileItem] = []
     @Published var isLoading: Bool = false
     private(set) var lastFetchSucceeded = false
+    private var localPackageIDByIdentity: [String: String] = [:]
+    private var hasPreparedLocalIndex = false
+
+    private lazy var downloadSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 45
+        config.timeoutIntervalForResource = 300
+        config.waitsForConnectivity = true
+        config.requestCachePolicy = .reloadRevalidatingCacheData
+        config.httpMaximumConnectionsPerHost = 2
+        return URLSession(configuration: config)
+    }()
 
     private var manifestURL: URL? {
         guard let value = Bundle.main.object(forInfoDictionaryKey: "PatchCloudManifestURL") as? String else {
@@ -237,7 +279,17 @@ final class OnlineFileFetcher: ObservableObject {
                 throw URLError(.badServerResponse)
             }
             let decoded = try JSONDecoder().decode([OnlineFileItem].self, from: data)
-            let activeFiles = decoded.filter { $0.status }
+            var seenPackageIDs = Set<String>()
+            let activeFiles = decoded
+                .filter { $0.status }
+                .sorted { $0.created_at > $1.created_at }
+                .filter { file in
+                    guard let rawID = file.packageID,
+                          let packageID = UUID(uuidString: rawID)?.uuidString.lowercased() else {
+                        return true
+                    }
+                    return seenPackageIDs.insert(packageID).inserted
+                }
             ServerPatchMetadataStore.replace(with: activeFiles)
             onlineFiles = activeFiles
             lastFetchSucceeded = true
@@ -258,23 +310,45 @@ final class OnlineFileFetcher: ObservableObject {
         progress: @escaping @MainActor (Int, Int, Int, String) -> Void,
         itemResult: @escaping @MainActor (OnlineFileItem, Bool) -> Void = { _, _ in }
     ) async -> Bool {
+        // Remove packages no longer present on the server before building the
+        // local lookup index. Otherwise the index can retain a just-deleted
+        // package and incorrectly skip its replacement.
+        let removedMissingPackages = await reconcileMissingServerPackages(manifest: files)
+        if removedMissingPackages {
+            store.reload()
+        }
         guard !files.isEmpty else { return true }
 
-        let localNames = await Task.detached(priority: .userInitiated) {
-            let localItems = PatchProjectLibrary.load()
-            return Set(localItems.map { item in
-                var identities = [item.packageURL.deletingPathExtension().lastPathComponent]
-                if let project = item.project {
-                    identities.append(project.name)
-                }
-                return identities.map(Self.normalizedLocalIdentity)
-            }.flatMap { $0 })
-        }.value
+        let localItems = store.items
+        let localNames = Set(localItems.map { item in
+            var identities = [item.packageURL.deletingPathExtension().lastPathComponent]
+            if let project = item.project {
+                identities.append(project.name)
+            }
+            return identities.map(Self.normalizedLocalIdentity)
+        }.flatMap { $0 })
+        let localPackageIDs = Set(localItems.map {
+            $0.summary.packageID.uuidString.lowercased()
+        })
+        var packageIDByIdentity: [String: String] = [:]
+        for item in localItems {
+            let packageID = item.summary.packageID.uuidString.lowercased()
+            let identities = [
+                item.packageURL.deletingPathExtension().lastPathComponent,
+                item.project?.name ?? ""
+            ].map(Self.normalizedLocalIdentity).filter { !$0.isEmpty }
+            for identity in identities where packageIDByIdentity[identity] == nil {
+                packageIDByIdentity[identity] = packageID
+            }
+        }
+
+        var knownLocalNames = localNames
+        var knownLocalPackageIDs = localPackageIDs
+        localPackageIDByIdentity = packageIDByIdentity
+        hasPreparedLocalIndex = true
 
         var completed = 0
         var failed = 0
-
-        await reconcileMissingServerPackages(manifest: files)
 
         for file in files {
             if Task.isCancelled { return false }
@@ -282,7 +356,11 @@ final class OnlineFileFetcher: ObservableObject {
             progress(completed, files.count, failed, file.title)
 
             let ok: Bool
-            if isAlreadyInstalled(file: file, localNames: localNames) {
+            if isAlreadyInstalled(
+                file: file,
+                localNames: knownLocalNames,
+                localPackageIDs: knownLocalPackageIDs
+            ) {
                 log("startup-patch: local package found, skip download – \(file.title)")
                 ok = true
             } else {
@@ -292,6 +370,11 @@ final class OnlineFileFetcher: ObservableObject {
             if ok {
                 completed += 1
                 markServerManaged(file)
+                knownLocalNames.insert(Self.normalizedLocalIdentity(file.title))
+                knownLocalNames.insert(Self.normalizedLocalIdentity(file.filename))
+                if let packageID = resolvedPackageID(for: file) {
+                    knownLocalPackageIDs.insert(packageID)
+                }
             } else {
                 failed += 1
             }
@@ -306,7 +389,7 @@ final class OnlineFileFetcher: ObservableObject {
         return !Task.isCancelled && failed == 0
     }
 
-    private func reconcileMissingServerPackages(manifest: [OnlineFileItem]) async {
+    private func reconcileMissingServerPackages(manifest: [OnlineFileItem]) async -> Bool {
         let key = "PatchProjects.serverManagedPackageIDs.v1"
         let previous = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
         let current = Set(manifest.compactMap { file in
@@ -315,16 +398,17 @@ final class OnlineFileFetcher: ObservableObject {
         })
         guard !previous.isEmpty else {
             persistManagedPackageIDs(current, key: key)
-            return
+            return false
         }
 
         let missing = previous.subtracting(current)
         guard !missing.isEmpty else {
             persistManagedPackageIDs(current, key: key)
-            return
+            return false
         }
 
         let localItems = PatchProjectLibrary.load()
+        var removedAny = false
         for item in localItems {
             let packageID = item.summary.packageID.uuidString.lowercased()
             guard missing.contains(packageID) else { continue }
@@ -334,6 +418,7 @@ final class OnlineFileFetcher: ObservableObject {
                     try DevicePatchService.restore(receipt: receipt)
                 }
                 try PatchProjectLibrary.delete(item)
+                removedAny = true
                 log("patch-sync: server source disappeared; local package deleted and patch disabled – \(packageID)")
             } catch {
                 log("patch-sync: failed to remove missing package \(packageID): \(error.localizedDescription)")
@@ -341,6 +426,7 @@ final class OnlineFileFetcher: ObservableObject {
         }
 
         persistManagedPackageIDs(current, key: key)
+        return removedAny
     }
 
     private func removeManagedPackage(for file: OnlineFileItem) {
@@ -369,6 +455,13 @@ final class OnlineFileFetcher: ObservableObject {
         var ids = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
         ids.insert(packageID)
         persistManagedPackageIDs(ids, key: key)
+
+        if let checksum = normalizedSHA256(file.sha256) {
+            let checksumKey = "PatchProjects.serverManagedSHA256.v1"
+            var checksums = UserDefaults.standard.dictionary(forKey: checksumKey) as? [String: String] ?? [:]
+            checksums[packageID] = checksum
+            UserDefaults.standard.set(checksums, forKey: checksumKey)
+        }
     }
 
     private func resolvedPackageID(for file: OnlineFileItem) -> String? {
@@ -384,13 +477,20 @@ final class OnlineFileFetcher: ObservableObject {
             )
         ].filter { !$0.isEmpty })
 
-        guard let local = PatchProjectLibrary.load().first(where: { item in
-            let localIdentities = [
-                Self.normalizedLocalIdentity(item.packageURL.deletingPathExtension().lastPathComponent),
-                Self.normalizedLocalIdentity(item.project?.name ?? "")
-            ]
-            return localIdentities.contains(where: serverIdentities.contains)
-        }) else {
+        if let packageID = serverIdentities.compactMap({ localPackageIDByIdentity[$0] }).first,
+           let uuid = UUID(uuidString: packageID) {
+            ServerPatchMetadataStore.associate(file, packageID: uuid)
+            return packageID
+        }
+
+        guard !hasPreparedLocalIndex,
+              let local = PatchProjectLibrary.load().first(where: { item in
+                  let localIdentities = [
+                      Self.normalizedLocalIdentity(item.packageURL.deletingPathExtension().lastPathComponent),
+                      Self.normalizedLocalIdentity(item.project?.name ?? "")
+                  ]
+                  return localIdentities.contains(where: serverIdentities.contains)
+              }) else {
             return nil
         }
 
@@ -423,60 +523,59 @@ final class OnlineFileFetcher: ObservableObject {
             )
         }
 
-        guard let rawURL = file.url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: rawURL),
+        guard let url = URL(string: file.url.trimmingCharacters(in: .whitespacesAndNewlines)),
               url.scheme?.lowercased() == "https" else {
             log("startup-patch: invalid HTTPS URL – \(file.title)")
             return false
         }
 
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 45
-        config.timeoutIntervalForResource = 300
-        config.waitsForConnectivity = true
+        for attempt in 1...3 {
+            do {
+                let (tmp, response) = try await downloadSession.download(from: url)
+                defer { try? FileManager.default.removeItem(at: tmp) }
 
-        do {
-            let (tmp, response) = try await URLSession(configuration: config).download(from: url)
-            defer { try? FileManager.default.removeItem(at: tmp) }
-
-            guard let http = response as? HTTPURLResponse else {
-                return false
-            }
-            if http.statusCode == 404 || http.statusCode == 410 {
-                removeManagedPackage(for: file)
-                return false
-            }
-            guard (200..<300).contains(http.statusCode), isSafeRegularFile(tmp) else {
-                return false
-            }
-
-            if let expected = normalizedSHA256(file.sha256) {
-                guard try sha256(of: tmp) == expected else {
-                    log("startup-patch: checksum mismatch – \(file.title)")
+                guard let http = response as? HTTPURLResponse else {
+                    throw URLError(.badServerResponse)
+                }
+                if http.statusCode == 404 || http.statusCode == 410 {
+                    removeManagedPackage(for: file)
                     return false
                 }
+                guard (200..<300).contains(http.statusCode), isSafeRegularFile(tmp) else {
+                    throw URLError(.badServerResponse)
+                }
+
+                if let expected = normalizedSHA256(file.sha256) {
+                    guard try sha256(of: tmp) == expected else {
+                        log("startup-patch: checksum mismatch – \(file.title)")
+                        return false
+                    }
+                }
+
+                let cacheURL = startupCacheURL(for: file)
+                try FileManager.default.createDirectory(
+                    at: startupCacheDirectory(),
+                    withIntermediateDirectories: true
+                )
+                try atomicReplace(source: tmp, destination: cacheURL)
+
+                return await importLocalPackage(
+                    cacheURL,
+                    manifest: file,
+                    password: file.password,
+                    store: store,
+                    removeCacheAfterSuccess: true
+                )
+            } catch is CancellationError {
+                return false
+            } catch {
+                log("startup-patch: \(file.title), attempt \(attempt)/3: \(error.localizedDescription)")
+                if attempt < 3 {
+                    try? await Task.sleep(for: .milliseconds(500 * attempt))
+                }
             }
-
-            let cacheURL = startupCacheURL(for: file)
-            try FileManager.default.createDirectory(
-                at: startupCacheDirectory(),
-                withIntermediateDirectories: true
-            )
-            try atomicReplace(source: tmp, destination: cacheURL)
-
-            return await importLocalPackage(
-                cacheURL,
-                manifest: file,
-                password: file.password,
-                store: store,
-                removeCacheAfterSuccess: true
-            )
-        } catch is CancellationError {
-            return false
-        } catch {
-            log("startup-patch: \(file.title): \(error.localizedDescription)")
-            return false
         }
+        return false
     }
 
     private func importLocalPackage(
@@ -509,8 +608,25 @@ final class OnlineFileFetcher: ObservableObject {
 
     private func isAlreadyInstalled(
         file: OnlineFileItem,
-        localNames: Set<String>
+        localNames: Set<String>,
+        localPackageIDs: Set<String>
     ) -> Bool {
+        if let packageID = resolvedPackageID(for: file),
+           localPackageIDs.contains(packageID) {
+            guard let expectedChecksum = normalizedSHA256(file.sha256) else {
+                return true
+            }
+            let checksumKey = "PatchProjects.serverManagedSHA256.v1"
+            let checksums = UserDefaults.standard.dictionary(forKey: checksumKey) as? [String: String] ?? [:]
+            // Existing installs created by older app versions have no saved
+            // fingerprint. Accept them once; markServerManaged migrates the
+            // current checksum after this successful pass.
+            guard let installedChecksum = checksums[packageID] else {
+                return true
+            }
+            return installedChecksum == expectedChecksum
+        }
+
         let filename = normalizedPackageFilename(file.filename, fallbackURL: file.url)
         if localNames.contains(Self.normalizedLocalIdentity(filename)) {
             return true
@@ -945,13 +1061,7 @@ struct OnlineFilesSheetView: View {
 
             let fileName = file.filename.isEmpty ? url.lastPathComponent : file.filename
             let finalName = fileName.hasSuffix(".3105") ? fileName : "\(fileName).3105"
-            let dest = FileManager.default.temporaryDirectory
-                .appendingPathComponent("\(UUID().uuidString)-\(finalName)")
-
-            try FileManager.default.copyItem(at: temporaryURL, to: dest)
-            defer { try? FileManager.default.removeItem(at: dest) }
-
-            let data = try Data(contentsOf: dest, options: .mappedIfSafe)
+            let data = try Data(contentsOf: temporaryURL, options: .mappedIfSafe)
             let imported = await store.importPackageAndWait(
                 data: data,
                 password: file.password
@@ -1081,15 +1191,7 @@ struct OnlineFilesSheetView: View {
                 }
                 try verifyDownloadedPatch(at: temporaryURL, manifest: file)
 
-                let fileName = file.filename.isEmpty ? url.lastPathComponent : file.filename
-                let finalName = fileName.hasSuffix(".3105") ? fileName : "\(fileName).3105"
-                let dest = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("\(UUID().uuidString)-\(finalName)")
-
-                try FileManager.default.copyItem(at: temporaryURL, to: dest)
-                defer { try? FileManager.default.removeItem(at: dest) }
-
-                let data = try Data(contentsOf: dest, options: .mappedIfSafe)
+                let data = try Data(contentsOf: temporaryURL, options: .mappedIfSafe)
                 let imported = await store.importPackageAndWait(
                     data: data,
                     password: file.password
@@ -1144,7 +1246,6 @@ struct PatchProjectsView: View {
     @StateObject private var store = PatchProjectStore()
     @ObservedObject private var appearance = AppearanceSettings.shared
     @StateObject private var patchState = PatchToggleStore()
-    @ObservedObject private var autoPatch = AutoPatchEngine.shared
 
     /// Mỗi configuration không xác định được đều giữ một group riêng.
     /// Không có group tổng hợp "Khác", vì việc gom các package khác nhau vào
@@ -1200,12 +1301,6 @@ struct PatchProjectsView: View {
                 store.reload()
                 AutoPatchEngine.shared.configure(store: store)
                 AutoPatchEngine.shared.trigger()
-            }
-            .onChange(of: autoPatch.hasCompleted) { completed in
-                guard completed else { return }
-                // AUTO has finished importing; perform one final UI refresh
-                // before the embedded spinner is removed.
-                store.reload()
             }
         }
     }
@@ -1767,8 +1862,8 @@ enum PatchAppGrouping {
         return buckets.compactMap { key, groupedItems in
             guard let kind = kinds[key], let name = names[key] else { return nil }
             let sortedItems = groupedItems.sorted {
-                $0.packageURL.lastPathComponent.localizedCaseInsensitiveCompare(
-                    $1.packageURL.lastPathComponent
+                patchDisplayTitle(for: $0).localizedCaseInsensitiveCompare(
+                    patchDisplayTitle(for: $1)
                 ) == .orderedAscending
             }
 
@@ -1793,6 +1888,10 @@ enum PatchAppGrouping {
         let project = item.project?.name ?? ""
         let filename = item.packageURL.deletingPathExtension().lastPathComponent
         return project.isEmpty ? filename : "\(project) \(filename)"
+    }
+
+    static func patchDisplayTitle(for item: PatchLibraryItem) -> String {
+        ServerPatchMetadataStore.displayTitle(for: item)
     }
 
     static func patchType(for item: PatchLibraryItem) -> PatchType {
@@ -2452,7 +2551,7 @@ private struct PatchAppDetailView: View {
                 )
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.project?.name ?? item.packageURL.deletingPathExtension().lastPathComponent)
+                Text(PatchAppGrouping.patchDisplayTitle(for: item))
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(.white)
                     .lineLimit(2)
@@ -2796,7 +2895,7 @@ private struct PatchProjectDetailView: View {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
         }
-        .navigationTitle(item?.project?.name ?? "")
+        .navigationTitle(item.map { PatchAppGrouping.patchDisplayTitle(for: $0) } ?? "")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog("Xác nhận Kích Hoạt", isPresented: $showApplyConfirmation, titleVisibility: .visible) {
             Button("Kích Hoạt") { apply() }

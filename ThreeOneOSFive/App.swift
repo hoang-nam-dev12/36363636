@@ -210,9 +210,9 @@ struct ThreeOneOSFiveApp: App {
 // This gate owns the launch contract:
 // 1. initialize;
 // 2. preload the selected anime asset;
-// 3. fetch the server patch manifest;
-// 4. download/import every active patch;
-// 5. expose the main UI only after 100% completion.
+// 3. refresh runtime configuration;
+// 4. expose the main UI after essential resources are ready.
+// Cloud patch discovery/import is intentionally deferred to the Patch screen.
 //
 // Progress is derived from completed real network/cache operations, not a timer.
 @MainActor
@@ -232,9 +232,6 @@ final class StartupResourceLoader: ObservableObject {
         detail = "Mở giao diện chính mà không nạp Patch chưa sẵn sàng"
         progress = 1.0
     }
-    private let patchStore = PatchProjectStore()
-    private let patchFetcher = OnlineFileFetcher()
-
     func start() async -> Bool {
         guard !started else { return progress >= 1 }
         started = true
@@ -275,101 +272,20 @@ final class StartupResourceLoader: ObservableObject {
         }
 
         setProgress(
-            0.20,
-            status: "Đang kiểm tra Patch...",
-            detail: "Đọc và xác minh toàn bộ Patch cục bộ"
+            0.78,
+            status: "Đang chuẩn bị khu vực Patch...",
+            detail: "Thư viện Patch sẽ được đọc khi bạn mở khu vực này"
         )
 
-        do {
-            let localCount = try PatchProjectLibrary.validateAllLocalPackages()
-            log("startup-patch: local integrity verified (\(localCount) package(s))")
-        } catch {
-            log("startup-patch: local integrity failure – \(error.localizedDescription)")
-            canSkipFailedPatch = true
-            setProgress(
-                0.20,
-                status: "Patch cục bộ không hợp lệ",
-                detail: "Patch lỗi. Bạn có thể bỏ qua Patch để vào ứng dụng."
-            )
-            return false
-        }
-
-        // The launch gate must never treat a failed manifest request as an
-        // empty patch set. Retry a few times so transient connectivity does
-        // not expose an unverified patch state.
-        var manifestReady = false
-        for attempt in 1...3 {
-            await patchFetcher.fetchServerFiles()
-            if patchFetcher.lastFetchSucceeded {
-                manifestReady = true
-                break
-            }
-            setProgress(
-                0.20,
-                status: "Đang kiểm tra Patch (\(attempt)/3)...",
-                detail: "Chưa nhận được manifest, đang thử lại"
-            )
-            if attempt < 3 {
-                try? await Task.sleep(for: .milliseconds(600))
-            }
-        }
-
-        guard manifestReady else {
-            log("startup-patch: manifest verification failed after retries")
-            canSkipFailedPatch = true
-            setProgress(
-                0.20,
-                status: "Không thể xác minh Patch",
-                detail: "Patch chưa xác minh được. Bạn có thể bỏ qua Patch để vào ứng dụng."
-            )
-            return false
-        }
-
-        let files = patchFetcher.onlineFiles
-
-        if files.isEmpty {
-            setProgress(
-                0.88,
-                status: "Đã xác minh Patch",
-                detail: "Manifest hợp lệ và không có Patch đang hoạt động"
-            )
-        } else {
-            let synchronized = await patchFetcher.preloadAllPatches(
-                files: files,
-                store: patchStore,
-                progress: { [weak self] completed, total, failed, current in
-                    guard let self else { return }
-                    let fraction = total > 0 ? Double(completed) / Double(total) : 1
-                    let mapped = 0.20 + (fraction * 0.68)
-                    let suffix = failed > 0 ? " • \(failed) lỗi" : ""
-                    self.setProgress(
-                        mapped,
-                        status: "Đang đồng bộ Patch \(completed)/\(total)",
-                        detail: current.isEmpty ? "Đang kiểm tra dữ liệu cục bộ\(suffix)" : "\(current)\(suffix)"
-                    )
-                },
-                itemResult: { file, ok in
-                    log("startup-patch: \(ok ? "ready" : "failed") – \(file.title)")
-                }
-            )
-
-            guard synchronized else {
-                log("startup-patch: synchronization failed or was cancelled")
-                canSkipFailedPatch = true
-                setProgress(
-                    0.88,
-                    status: "Patch chưa sẵn sàng",
-                    detail: "Patch lỗi hoặc chưa đồng bộ được. Bạn có thể bỏ qua Patch để vào ứng dụng."
-                )
-                return false
-            }
-
-            setProgress(
-                0.88,
-                status: "Đã đồng bộ Patch",
-                detail: "Toàn bộ Patch đang hoạt động đã được xác minh và nhập"
-            )
-        }
+        // Không tải manifest và toàn bộ file .3105 trong startup gate. Việc đó
+        // từng làm ứng dụng bị giữ ở màn hình mở đầu khi tunnel chậm hoặc một
+        // patch tạm thời lỗi. AutoPatchEngine sẽ đồng bộ đúng một lần khi người
+        // dùng mở khu vực Patch; thư viện cục bộ vẫn được kiểm tra ở trên.
+        setProgress(
+            0.88,
+            status: "Patch cục bộ đã sẵn sàng",
+            detail: "Patch cloud sẽ đồng bộ nền khi mở khu vực Patch"
+        )
 
         setProgress(
             0.90,

@@ -1755,11 +1755,33 @@ final class AutoPatchEngine: ObservableObject {
         // until the application was relaunched. Local packages are still reused
         // by preloadAllPatches(), so refreshing the manifest does not redownload
         // packages that are already installed.
-        await fetcher.fetchServerFiles()
+        for attempt in 1...2 {
+            await fetcher.fetchServerFiles()
+            if fetcher.lastFetchSucceeded { break }
+            if attempt < 2 {
+                try? await Task.sleep(for: .milliseconds(650))
+            }
+        }
+
+        guard fetcher.lastFetchSucceeded else {
+            failedCount = 1
+            hasCompleted = true
+            log("auto-patch: manifest unavailable after retry; keeping local patches")
+            return
+        }
+
         fetchedFiles = fetcher.onlineFiles
+        // Metadata (tên hiển thị, game, phân loại) có thể đổi mà không cần tải
+        // lại package. Báo UI vẽ lại mà không quét lại toàn bộ thư viện.
+        store.refreshPresentation()
 
         totalCount = fetchedFiles.count
         guard !fetchedFiles.isEmpty else {
+            _ = await fetcher.preloadAllPatches(
+                files: [],
+                store: store,
+                progress: { _, _, _, _ in }
+            )
             hasCompleted = true
             return
         }

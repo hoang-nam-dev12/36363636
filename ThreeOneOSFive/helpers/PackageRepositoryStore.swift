@@ -243,6 +243,9 @@ final class PackageRepositoryStore: ObservableObject {
         guard !downloadingPackageKeys.contains(record.id) else {
             return
         }
+        // PatchProjectStore is intentionally lazy so app startup does not scan
+        // every local .3105 package. Load it only when an install is requested.
+        patchStore.reload()
         downloadStartedAtByPackageKey[record.id] = Date()
         downloadingPackageKeys.insert(record.id)
 

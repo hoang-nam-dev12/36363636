@@ -18,3 +18,8 @@ Payload/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Archives & Temporary Workspace Folders
+*.zip
+Duy-Manh-Store-iOS/
+patch-cloud-web/

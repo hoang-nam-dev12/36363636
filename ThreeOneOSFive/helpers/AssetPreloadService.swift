@@ -41,7 +41,7 @@ actor AssetPreloadService {
 
     private func destination(for asset: RemoteAsset) -> URL {
         let filename = asset.key == "audio.background"
-            ? "audio_background_v2"
+            ? "audio_background_v3"
             : asset.key.replacingOccurrences(of: ".", with: "_")
         return cacheDirectory.appendingPathComponent(
             "\(filename).\(asset.fileExtension)"
@@ -57,6 +57,13 @@ actor AssetPreloadService {
     func preloadAll() async {
         do {
             try fm.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+            // Purge legacy audio files to ensure only the updated music plays
+            for legacy in ["audio_background.mp3", "audio_background_v2.mp3", "audio_background.wav", "audio_background.m4a"] {
+                let legacyURL = cacheDirectory.appendingPathComponent(legacy)
+                if fm.fileExists(atPath: legacyURL.path) {
+                    try? fm.removeItem(at: legacyURL)
+                }
+            }
         } catch {
             log("asset-cache: cannot create cache directory: \(error.localizedDescription)")
             return
@@ -180,7 +187,7 @@ actor AssetPreloadService {
             "background.static": "background_static.mov",
             "background.dynamic": "background_dynamic.mp4",
             "home.cover": "home_cover.jpg",
-            "audio.background": "audio_background_v2.mp3"
+            "audio.background": "audio_background_v3.mp3"
         ]
         guard let name = mapping[key] else { return nil }
         let url = directory.appendingPathComponent(name)

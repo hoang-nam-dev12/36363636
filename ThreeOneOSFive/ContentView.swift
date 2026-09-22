@@ -1116,6 +1116,8 @@ struct ContentView: View {
         .onAppear {
             tabNavigation.reconcileSelection(with: featureVisibility)
             AppTabNavigationStore.save(tabNavigation)
+            AutoPatchEngine.shared.configure(store: repositoryPatchStore)
+            AutoPatchEngine.shared.trigger()
             Task { @MainActor in
                 let loaded = await runtimeConfig.refresh()
                 guard loaded else {
@@ -1794,15 +1796,20 @@ final class AutoPatchEngine: ObservableObject {
                 self.completedCount = completed
                 self.failedCount = failed
             },
-            itemResult: { file, ok in
+            itemResult: { [weak self] file, ok in
                 PatchDownloadBannerCoordinator.shared.update(
                     id: file.id,
                     status: ok ? .done : .failed
                 )
+                if ok {
+                    self?.store?.reload()
+                    self?.store?.refreshPresentation()
+                }
             }
         )
 
         store.reload()
+        store.refreshPresentation()
         hasCompleted = true
     }
 

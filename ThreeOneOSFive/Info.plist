@@ -84,6 +84,10 @@
 	<string>https://compound-prev-blast-fits.trycloudflare.com/api/patches</string>
 	<key>ServerLicenseCheckURL</key>
 	<string>https://compound-prev-blast-fits.trycloudflare.com/api/check</string>
+	<key>AppRuntimeConfigURL</key>
+	<string>https://compound-prev-blast-fits.trycloudflare.com/api/config</string>
+	<key>PatchCloudWebsiteURL</key>
+	<string>https://compound-prev-blast-fits.trycloudflare.com</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

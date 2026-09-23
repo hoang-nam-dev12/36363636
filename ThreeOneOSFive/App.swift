@@ -853,7 +853,20 @@ final class AppRuntimeConfig: ObservableObject {
         }
     }
 
-    private static let endpoint = "https://appfluxcore.site/api/config.php?key=app_runtime"
+    private static var endpoint: String {
+        if let configured = Bundle.main.object(forInfoDictionaryKey: "AppRuntimeConfigURL") as? String {
+            let value = configured.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty { return value }
+        }
+
+        // Keep maintenance on the same host as Server Key. This also means a
+        // future trycloudflare hostname only needs to be changed in Info.plist.
+        if let licenseValue = Bundle.main.object(forInfoDictionaryKey: "ServerLicenseCheckURL") as? String,
+           let licenseURL = URL(string: licenseValue.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return licenseURL.deletingLastPathComponent().appendingPathComponent("config").absoluteString
+        }
+        return ""
+    }
 
     private struct RuntimeEnvelope: Decodable {
         let value: RuntimeValue

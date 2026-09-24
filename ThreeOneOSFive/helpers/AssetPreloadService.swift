@@ -28,9 +28,9 @@ actor AssetPreloadService {
             .init(key: "icon.pubg", url: URL(string: "https://i.ibb.co/5Xvm4Nc6/IMG-8640.jpg")!, fileExtension: "jpg"),
             .init(key: "icon.lienquan", url: URL(string: "https://i.ibb.co/3mr8wR8m/IMG-8641.jpg")!, fileExtension: "jpg"),
             .init(key: "background.static", url: URL(string: AppearanceSettings.BackgroundMode.animeStaticVideoURL)!, fileExtension: "mov"),
-            .init(key: "background.dynamic", url: URL(string: AppearanceSettings.BackgroundMode.animeDynamicVideoURL)!, fileExtension: "mp4"),
+            .init(key: "background.dynamic", url: URL(string: AppearanceSettings.BackgroundMode.animeDynamicVideoURL)!, fileExtension: "mov"),
             .init(key: "home.cover", url: URL(string: "https://www.image2url.com/r2/default/files/1790007520502-b6c3841b-1960-41fc-9ee2-76d4c3d44358.jpg")!, fileExtension: "jpg"),
-            .init(key: "audio.background", url: URL(string: "https://www.image2url.com/r2/default/files/1790007348399-b69ab7ff-1a62-4dca-98f6-91c724c62e20.mp3")!, fileExtension: "mp3")
+            .init(key: "audio.background", url: URL(string: "https://www.image2url.com/r2/default/files/1790246076342-c3e31dc9-dab8-482e-a09a-40050ac0e186.mp3")!, fileExtension: "mp3")
         ]
     }
 
@@ -41,7 +41,7 @@ actor AssetPreloadService {
 
     private func destination(for asset: RemoteAsset) -> URL {
         let filename = asset.key == "audio.background"
-            ? "audio_background_v3"
+            ? "audio_background_v4"
             : asset.key.replacingOccurrences(of: ".", with: "_")
         return cacheDirectory.appendingPathComponent(
             "\(filename).\(asset.fileExtension)"
@@ -58,7 +58,7 @@ actor AssetPreloadService {
         do {
             try fm.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
             // Purge legacy audio files to ensure only the updated music plays
-            for legacy in ["audio_background.mp3", "audio_background_v2.mp3", "audio_background.wav", "audio_background.m4a"] {
+            for legacy in ["audio_background.mp3", "audio_background_v2.mp3", "audio_background_v3.mp3", "audio_background.wav", "audio_background.m4a"] {
                 let legacyURL = cacheDirectory.appendingPathComponent(legacy)
                 if fm.fileExists(atPath: legacyURL.path) {
                     try? fm.removeItem(at: legacyURL)
@@ -90,9 +90,10 @@ actor AssetPreloadService {
             guard let asset = remoteAssets.first(where: { $0.key == key }),
                   let videoURL = cachedURL(forKey: key) else { continue }
 
-            let frameURL = cacheDirectory.appendingPathComponent(
-                "\(asset.key.replacingOccurrences(of: ".", with: "_"))_firstframe.png"
-            )
+            let frameName = asset.key == "background.dynamic"
+                ? "background_dynamic_v2_firstframe.png"
+                : "\(asset.key.replacingOccurrences(of: ".", with: "_"))_firstframe.png"
+            let frameURL = cacheDirectory.appendingPathComponent(frameName)
             guard !fm.fileExists(atPath: frameURL.path) else { continue }
 
             let avAsset = AVAsset(url: videoURL)
@@ -185,9 +186,9 @@ actor AssetPreloadService {
             "icon.pubg": "icon_pubg.jpg",
             "icon.lienquan": "icon_lienquan.jpg",
             "background.static": "background_static.mov",
-            "background.dynamic": "background_dynamic.mp4",
+            "background.dynamic": "background_dynamic.mov",
             "home.cover": "home_cover.jpg",
-            "audio.background": "audio_background_v3.mp3"
+            "audio.background": "audio_background_v4.mp3"
         ]
         guard let name = mapping[key] else { return nil }
         let url = directory.appendingPathComponent(name)
@@ -201,7 +202,7 @@ actor AssetPreloadService {
             .appendingPathComponent("AssetCache.v2", isDirectory: true)
         let mapping: [String: String] = [
             "animeStatic": "background_static_firstframe.png",
-            "animeDynamic": "background_dynamic_firstframe.png"
+            "animeDynamic": "background_dynamic_v2_firstframe.png"
         ]
         guard let name = mapping[key] else { return nil }
         let url = directory.appendingPathComponent(name)

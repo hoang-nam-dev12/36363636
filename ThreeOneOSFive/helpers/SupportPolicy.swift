@@ -3,22 +3,7 @@ import Foundation
 enum ExploitSupportPolicy {
     static let verifiedIOS17Range = "17.0–17.7.x"
     static let verifiedIOS18Range = "18.0–18.7.1"
-    static let verifiedIOS26Range = "26.0–26.6.1"
-
-    static let verifiedIOS27Builds: [(beta: Int, publicBeta: Int?, build: String)] = [
-        (1, nil, "24A5355q"),
-        (2, nil, "24A5370h"),
-        (3, 1, "24A5380h"),
-        (4, 2, "24A5390f")
-    ]
-
-    static func iOS27BetaNumber(for build: String) -> Int? {
-        verifiedIOS27Builds.first { $0.build == build }?.beta
-    }
-
-    static func iOS27PublicBetaNumber(for build: String) -> Int? {
-        verifiedIOS27Builds.first { $0.build == build }?.publicBeta
-    }
+    static let verifiedIOS26Range = "26.0.x"
 
     static func supportsKernelExploit(major: Int, minor: Int, patch: Int) -> Bool {
         guard minor >= 0, patch >= 0 else { return false }
@@ -34,17 +19,34 @@ enum ExploitSupportPolicy {
         return false
     }
 
-    static func isSupported(major: Int, minor: Int, patch: Int, build: String) -> Bool {
+    /// The SwiftUI, network and .3105 codec layers compile and run on iOS 16+.
+    /// This does not imply that privileged container/system access is available.
+    static func supportsAppRuntime(major: Int) -> Bool {
+        major >= 16
+    }
+
+    /// Mirrors the backend that is actually compiled into this target. The
+    /// native offsets table accepts verified iOS 17/18 builds and iOS 26.0,
+    /// but has no iOS 16 or iOS 27 offsets. Unknown builds fail closed.
+    static func supportsCompiledSystemAccess(
+        major: Int,
+        minor: Int,
+        patch: Int,
+        build: String
+    ) -> Bool {
+        guard !build.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         if supportsKernelExploit(major: major, minor: minor, patch: patch) {
             return true
         }
+        return major == 26 && minor == 0 && patch >= 0
+    }
 
-        if major == 26 {
-            guard minor >= 0, patch >= 0 else { return false }
-            return minor < 6 || (minor == 6 && patch <= 1)
-        }
-
-        guard major == 27, minor == 0, patch == 0 else { return false }
-        return iOS27BetaNumber(for: build) != nil
+    static func isSupported(major: Int, minor: Int, patch: Int, build: String) -> Bool {
+        supportsCompiledSystemAccess(
+            major: major,
+            minor: minor,
+            patch: patch,
+            build: build
+        )
     }
 }

@@ -291,6 +291,7 @@ final class OnlineFileFetcher: ObservableObject {
         config.waitsForConnectivity = true
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.urlCache = nil
+        config.connectionProxyDictionary = [:]
         config.httpMaximumConnectionsPerHost = 1
         return URLSession(configuration: config)
     }()
@@ -301,6 +302,7 @@ final class OnlineFileFetcher: ObservableObject {
         config.timeoutIntervalForResource = 300
         config.waitsForConnectivity = true
         config.requestCachePolicy = .reloadRevalidatingCacheData
+        config.connectionProxyDictionary = [:]
         config.httpMaximumConnectionsPerHost = 2
         return URLSession(configuration: config)
     }()
@@ -312,7 +314,18 @@ final class OnlineFileFetcher: ObservableObject {
         return URL(string: value.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
+    func cancelNetworkRequests() {
+        manifestSession.getAllTasks { tasks in tasks.forEach { $0.cancel() } }
+        downloadSession.getAllTasks { tasks in tasks.forEach { $0.cancel() } }
+        isLoading = false
+        downloadingIDs.removeAll()
+    }
+
     func fetchServerFiles(force: Bool = false) async {
+        guard NetworkInterceptionGuard.shared.evaluate() else {
+            lastFetchSucceeded = false
+            return
+        }
         guard !isLoading else { return }
         if !force, let last = lastFetchDate, Date().timeIntervalSince(last) < minFetchInterval, !onlineFiles.isEmpty {
             log("online-files: skipped fetch, cached manifest still fresh")
@@ -397,6 +410,7 @@ final class OnlineFileFetcher: ObservableObject {
 
     /// Tải một patch đơn lẻ khi người dùng yêu cầu (on-demand download)
     func downloadSinglePatch(file: OnlineFileItem, store: PatchProjectStore) async -> Bool {
+        guard NetworkInterceptionGuard.shared.evaluate() else { return false }
         guard !downloadingIDs.contains(file.id) else { return false }
         downloadingIDs.insert(file.id)
         defer { downloadingIDs.remove(file.id) }
@@ -652,48 +666,29 @@ final class OnlineFileFetcher: ObservableObject {
             )
         }
 
-        guard let url = URL(string: file.url.trimmingCharacters(in: .whitespacesAndNewlines)),
-              url.scheme?.lowercased() == "https" else {
-            log("startup-patch: invalid HTTPS URL – \(file.title)")
-            return false
-        }
-
         for attempt in 1...3 {
             do {
-                let (tmp, response) = try await downloadSession.download(from: url)
-                defer { try? FileManager.default.removeItem(at: tmp) }
-
-                guard let http = response as? HTTPURLResponse else {
-                    throw URLError(.badServerResponse)
+                let key = UserDefaults.standard.string(forKey: "saved_key") ?? ""
+                let downloads = try await PatchDownloadManager.shared.download(
+                    fileIDs: [file.id],
+                    licenseKey: key
+                )
+                guard let payload = downloads[file.id] else { throw ClientAPIError.downloadFailed }
+                let data = payload.data
+                if let expectedSize = file.size, expectedSize > 0, data.count != expectedSize {
+                    throw OnlinePatchDownloadError.sizeMismatch
                 }
-                if http.statusCode == 404 || http.statusCode == 410 {
-                    removeManagedPackage(for: file)
-                    return false
-                }
-                guard (200..<300).contains(http.statusCode), isSafeRegularFile(tmp) else {
-                    throw URLError(.badServerResponse)
-                }
-
                 if let expected = normalizedSHA256(file.sha256) {
-                    guard try sha256(of: tmp) == expected else {
+                    guard sha256(of: data) == expected else {
                         log("startup-patch: checksum mismatch – \(file.title)")
                         return false
                     }
                 }
-
-                let cacheURL = startupCacheURL(for: file)
-                try FileManager.default.createDirectory(
-                    at: startupCacheDirectory(),
-                    withIntermediateDirectories: true
-                )
-                try atomicReplace(source: tmp, destination: cacheURL)
-
-                return await importLocalPackage(
-                    cacheURL,
+                return await importPackageData(
+                    data,
                     manifest: file,
-                    password: file.password,
-                    store: store,
-                    removeCacheAfterSuccess: true
+                    password: payload.password ?? file.password,
+                    store: store
                 )
             } catch is CancellationError {
                 return false
@@ -705,6 +700,22 @@ final class OnlineFileFetcher: ObservableObject {
             }
         }
         return false
+    }
+
+    private func importPackageData(
+        _ data: Data,
+        manifest file: OnlineFileItem,
+        password: String?,
+        store: PatchProjectStore
+    ) async -> Bool {
+        let packageID = try? PatchPackageCodec.inspect(data).packageID
+        if let packageID { ServerPatchMetadataStore.associate(file, packageID: packageID) }
+        let ok = await store.importPackageAndWait(data: data, password: password, timeout: 45)
+        if ok, let packageID {
+            ServerPatchMetadataStore.associate(file, packageID: packageID)
+            markServerManaged(file)
+        }
+        return ok
     }
 
     private func importLocalPackage(
@@ -829,6 +840,10 @@ final class OnlineFileFetcher: ObservableObject {
             hasher.update(data: chunk)
         }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func sha256(of data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     private func isSafeRegularFile(_ url: URL) -> Bool {
@@ -1142,80 +1157,51 @@ struct OnlineFilesSheetView: View {
         }
 
         Task(priority: .userInitiated) {
-            // PatchProjectStore is deliberately serialized: importPackage()
-            // rejects a second import while the first transaction is busy.
-            // Running these imports concurrently silently drops every import
-            // after the first one. Downloads remain complete, but installation
-            // is performed one package at a time and each import is awaited.
-            for file in files {
-                if Task.isCancelled { break }
-                await downloadSingleForBatch(file)
+            do {
+                for file in files {
+                    updateBatch(id: file.id, fraction: 0.05, status: .downloading)
+                }
+                let key = UserDefaults.standard.string(forKey: "saved_key") ?? ""
+                // Every file receives its own one-time JWT. Network transfers run
+                // concurrently in memory; imports remain serialized because the
+                // PatchProjectStore transaction intentionally accepts one writer.
+                let payloads = try await PatchDownloadManager.shared.download(
+                    fileIDs: files.map(\.id),
+                    licenseKey: key
+                )
+                for file in files {
+                    if Task.isCancelled { break }
+                    guard let payload = payloads[file.id] else {
+                        updateBatch(id: file.id, fraction: 0, status: .failed("Thiếu dữ liệu tải về"))
+                        batchErrorCount += 1
+                        continue
+                    }
+                    let data = payload.data
+                    updateBatch(id: file.id, fraction: 0.65, status: .importing)
+                    let imported = await store.importPackageAndWait(
+                        data: data,
+                        password: payload.password ?? file.password
+                    )
+                    guard imported else {
+                        updateBatch(id: file.id, fraction: 0, status: .failed("Import thất bại"))
+                        batchErrorCount += 1
+                        continue
+                    }
+                    let packageID = try? PatchPackageCodec.inspect(data).packageID
+                    fetcher.recordSuccessfulImport(file, packageID: packageID)
+                    updateBatch(id: file.id, fraction: 1, status: .done)
+                    batchDoneCount += 1
+                }
+            } catch {
+                for file in files {
+                    if let progress = batchProgresses.first(where: { $0.id == file.id }),
+                       case .done = progress.status { continue }
+                    updateBatch(id: file.id, fraction: 0, status: .failed(error.localizedDescription))
+                }
+                batchErrorCount = files.count - batchDoneCount
             }
-            await MainActor.run {
-                isBatchRunning = false
-                showBatchSummary = true
-            }
-        }
-    }
-
-    private func downloadSingleForBatch(_ file: OnlineFileItem) async {
-        guard let url = URL(string: file.url) else {
-            updateBatch(id: file.id, fraction: 0, status: .failed("URL không hợp lệ"))
-            await MainActor.run { batchErrorCount += 1 }
-            return
-        }
-
-        // Validate HTTPS
-        guard url.scheme?.lowercased() == "https", url.host != nil else {
-            updateBatch(id: file.id, fraction: 0, status: .failed("URL phải HTTPS"))
-            await MainActor.run { batchErrorCount += 1 }
-            return
-        }
-
-        updateBatch(id: file.id, fraction: 0.05, status: .downloading)
-
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 45
-        config.timeoutIntervalForResource = 300
-        config.waitsForConnectivity = true
-
-        do {
-            let (temporaryURL, response) = try await URLSession(configuration: config).download(from: url)
-            defer { try? FileManager.default.removeItem(at: temporaryURL) }
-
-            guard let httpResponse = response as? HTTPURLResponse,
-                   (200..<300).contains(httpResponse.statusCode) else {
-                throw OnlinePatchDownloadError.badResponse
-            }
-            try verifyDownloadedPatch(at: temporaryURL, manifest: file)
-
-            updateBatch(id: file.id, fraction: 0.6, status: .importing)
-
-            let fileName = file.filename.isEmpty ? url.lastPathComponent : file.filename
-            let finalName = fileName.hasSuffix(".3105") ? fileName : "\(fileName).3105"
-            let data = try Data(contentsOf: temporaryURL, options: .mappedIfSafe)
-            let imported = await store.importPackageAndWait(
-                data: data,
-                password: file.password
-            )
-            guard imported else {
-                updateBatch(id: file.id, fraction: 0, status: .failed("Import thất bại"))
-                await MainActor.run { batchErrorCount += 1 }
-                return
-            }
-
-            let packageID = try? PatchPackageCodec.inspect(data).packageID
-            fetcher.recordSuccessfulImport(file, packageID: packageID)
-
-            log("batch-download: imported \(finalName)")
-            updateBatch(id: file.id, fraction: 1.0, status: .done)
-            await MainActor.run { batchDoneCount += 1 }
-
-        } catch {
-            let msg = error.localizedDescription.isEmpty ? "Lỗi tải xuống" : error.localizedDescription
-            log("batch-download: failed \(file.filename) – \(error.localizedDescription)")
-            updateBatch(id: file.id, fraction: 0, status: .failed(msg))
-            await MainActor.run { batchErrorCount += 1 }
+            isBatchRunning = false
+            showBatchSummary = true
         }
     }
 
@@ -1296,36 +1282,21 @@ struct OnlineFilesSheetView: View {
 
     // Existing single-file download (unchanged logic, migrated to async/await)
     private func downloadAndImport(file: OnlineFileItem) {
-        guard let url = URL(string: file.url) else {
-            log("single-download: invalid URL for \(file.filename)")
-            return
-        }
-        guard url.scheme?.lowercased() == "https", url.host != nil else {
-            log("single-download: rejected non-HTTPS URL for \(file.filename)")
-            return
-        }
         downloadingFileID = file.id
 
         Task(priority: .userInitiated) {
             defer { downloadingFileID = nil }
             do {
-                let config = URLSessionConfiguration.default
-                config.timeoutIntervalForRequest = 45
-                config.timeoutIntervalForResource = 120
-                config.waitsForConnectivity = true
-                let (temporaryURL, response) = try await URLSession(configuration: config).download(from: url)
-                defer { try? FileManager.default.removeItem(at: temporaryURL) }
-
-                guard let httpResponse = response as? HTTPURLResponse,
-                      (200..<300).contains(httpResponse.statusCode) else {
-                    throw OnlinePatchDownloadError.badResponse
-                }
-                try verifyDownloadedPatch(at: temporaryURL, manifest: file)
-
-                let data = try Data(contentsOf: temporaryURL, options: .mappedIfSafe)
+                let key = UserDefaults.standard.string(forKey: "saved_key") ?? ""
+                let payloads = try await PatchDownloadManager.shared.download(
+                    fileIDs: [file.id],
+                    licenseKey: key
+                )
+                guard let payload = payloads[file.id] else { throw ClientAPIError.downloadFailed }
+                let data = payload.data
                 let imported = await store.importPackageAndWait(
                     data: data,
-                    password: file.password
+                    password: payload.password ?? file.password
                 )
                 guard imported else {
                     throw PatchPackageError.invalidPasswordOrCorruptedPackage

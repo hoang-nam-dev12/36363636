@@ -16,7 +16,7 @@ final class FluxCoreAudioPlayer: ObservableObject {
 
     @Published private(set) var isPlaying: Bool = false
 
-    private let musicURL = URL(string: "https://www.image2url.com/r2/default/files/1790007348399-b69ab7ff-1a62-4dca-98f6-91c724c62e20.mp3")!
+    private let musicURL = URL(string: "https://www.image2url.com/r2/default/files/1790246076342-c3e31dc9-dab8-482e-a09a-40050ac0e186.mp3")!
 
     private var resolvedMusicURL: URL {
         AssetPreloadService.cachedURL(key: "audio.background") ?? musicURL
@@ -92,6 +92,8 @@ struct ThreeOneOSFiveApp: App {
     @StateObject private var repositoryStore = PackageRepositoryStore()
     @StateObject private var repositoryPatchStore = PatchProjectStore()
     @StateObject private var startupLoader = StartupResourceLoader()
+    @StateObject private var lifecycleCoordinator = AppLifecycleCoordinator()
+    @StateObject private var networkInterceptionGuard = NetworkInterceptionGuard.shared
     @AppStorage(AppLanguage.storageKey) private var languageCode = AppLanguage.vietnamese.rawValue
     // Startup loading is intentionally blocking. The existing language onboarding
     // remains available through its store, but must not interrupt the required
@@ -130,6 +132,7 @@ struct ThreeOneOSFiveApp: App {
                     .environmentObject(fileOperationCoordinator)
                     .environmentObject(repositoryStore)
                     .environmentObject(repositoryPatchStore)
+                    .environmentObject(networkInterceptionGuard)
                     .environment(\.appLanguage, language)
                     .environment(\.locale, language.locale)
                     .opacity(startupReady ? 1 : 0)
@@ -155,6 +158,13 @@ struct ThreeOneOSFiveApp: App {
                         .zIndex(10_000)
                         .allowsHitTesting(true)
                 }
+
+                if networkInterceptionGuard.isBlocked {
+                    NetworkInterceptionBlockView(guardState: networkInterceptionGuard)
+                        .transition(.opacity)
+                        .zIndex(20_000)
+                        .allowsHitTesting(true)
+                }
             }
             .displayIdentityAttribution(isPresented: $showAttribution, enabled: !showOnboarding)
             .sheet(isPresented: $showAttribution) {
@@ -173,6 +183,8 @@ struct ThreeOneOSFiveApp: App {
                 )
             }
             .onAppear {
+                guard networkInterceptionGuard.evaluate() else { return }
+                lifecycleCoordinator.becameActive()
                 guard !startupReady else { return }
 
                 Task { @MainActor in
@@ -193,7 +205,12 @@ struct ThreeOneOSFiveApp: App {
                 }
             }
             .onChange(of: scenePhase) { phase in
+                if phase == .background {
+                    lifecycleCoordinator.enteredBackground()
+                }
                 guard phase == .active, !showOnboarding else { return }
+                guard networkInterceptionGuard.evaluate() else { return }
+                lifecycleCoordinator.becameActive()
                 appState.detectSupport()
             }
             .onOpenURL { url in
@@ -688,8 +705,6 @@ class AppState: ObservableObject {
     @Published var unsupportedMessage: String?
     @Published var kernelExploitRunning = false
 
-    private var autoRunAttempted = false
-
     var kernelExploitApplicable: Bool {
         KernelExploit.isApplicable(
             major: AppInfo.versionTuple.major,
@@ -699,23 +714,38 @@ class AppState: ObservableObject {
         )
     }
 
-    var isSupported: Bool { unsupportedMessage == nil }
+    var isSupported: Bool { exploitStatus.isSuccess }
+
+    var capabilityStatusText: String {
+        if exploitStatus.isSuccess { return "Capability đã xác minh" }
+        if kernelExploitApplicable { return "Candidate — chưa xác minh" }
+        return "Chỉ UI/API/.3105"
+    }
 
     func detectSupport() {
         let v = AppInfo.versionTuple
-        let supported = ExploitSupportPolicy.isSupported(
-            major: v.major,
-            minor: v.minor,
-            patch: v.patch,
-            build: AppInfo.osBuild
-        )
+        let runtimeSupported = ExploitSupportPolicy.supportsAppRuntime(major: v.major)
 #if targetEnvironment(simulator)
         if ProcessInfo.processInfo.arguments.contains("--simulate-access") {
             exploitStatus = .success(method: "Simulator preview")
         }
 #endif
 
-        unsupportedMessage = supported ? nil : "iOS \(AppInfo.osVersion) (\(AppInfo.osBuild))"
+        guard runtimeSupported else {
+            unsupportedMessage = "iOS \(AppInfo.osVersion) không chạy được giao diện ứng dụng"
+            exploitStatus = .unsupported(unsupportedMessage ?? "Unsupported runtime")
+            return
+        }
+
+        let systemAccessSupported = ExploitSupportPolicy.supportsCompiledSystemAccess(
+            major: v.major,
+            minor: v.minor,
+            patch: v.patch,
+            build: AppInfo.osBuild
+        )
+        unsupportedMessage = systemAccessSupported
+            ? nil
+            : "iOS \(AppInfo.osVersion) (\(AppInfo.osBuild)): UI/API/.3105 hoạt động, system access chưa có backend đã xác minh"
         if let unsupportedMessage {
             exploitStatus = .unsupported(unsupportedMessage)
             return
@@ -730,17 +760,6 @@ class AppState: ObservableObject {
         guard applicable else { return }
 
         refreshKernelExploitStatus()
-        maybeAutoRunKernelExploit()
-    }
-
-    private func maybeAutoRunKernelExploit() {
-        guard !kernelExploitRunning,
-              !exploitStatus.isSuccess,
-              !exploitStatus.isFailed,
-              !autoRunAttempted else { return }
-        autoRunAttempted = true
-        log("app: starting kernel exploit automatically")
-        runKernelExploitIfNeeded()
     }
 
     private func refreshKernelExploitStatus() {
@@ -811,6 +830,7 @@ final class AppRuntimeConfig: ObservableObject {
     private init() {}
 
     func refresh() async -> Bool {
+        guard NetworkInterceptionGuard.shared.evaluate() else { return false }
         refreshTask?.cancel()
         guard let url = URL(string: Self.endpoint) else { return false }
 
@@ -827,8 +847,13 @@ final class AppRuntimeConfig: ObservableObject {
                 return false
             }
 
-            let envelope = try JSONDecoder().decode(RuntimeEnvelope.self, from: data)
-            let value = envelope.value
+            let decoder = JSONDecoder()
+            let value: RuntimeValue
+            if let v1 = try? decoder.decode(V1RuntimeEnvelope.self, from: data) {
+                value = v1.maintenance
+            } else {
+                value = try decoder.decode(RuntimeEnvelope.self, from: data).value
+            }
 
             let validButtons = value.maintenanceButtons.filter { button in
                 guard let components = URLComponents(string: button.url),
@@ -863,6 +888,10 @@ final class AppRuntimeConfig: ObservableObject {
 
     private struct RuntimeEnvelope: Decodable {
         let value: RuntimeValue
+    }
+
+    private struct V1RuntimeEnvelope: Decodable {
+        let maintenance: RuntimeValue
     }
 
     private struct RuntimeValue: Decodable {

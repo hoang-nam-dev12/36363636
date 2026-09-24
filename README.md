@@ -10,7 +10,7 @@
 
 <p align="center">
   <img alt="Version" src="https://img.shields.io/badge/version-2.0-E6753A?style=flat-square">
-  <img alt="iOS" src="https://img.shields.io/badge/iOS-17.0–18.7.1%20%7C%2026.0–26.6.1%20%7C%2027%20beta%201–4-222222?style=flat-square">
+  <img alt="iOS" src="https://img.shields.io/badge/UI%2FAPI-iOS%2016%2B%20%7C%20system%20access%20build--specific-222222?style=flat-square">
   <img alt="Swift" src="https://img.shields.io/badge/Swift-5-F05138?style=flat-square&logo=swift&logoColor=white">
   <img alt="Languages" src="https://img.shields.io/badge/languages-English%20%7C%20Tiếng%20Việt%20%7C%20简体中文-E6753A?style=flat-square">
 </p>
@@ -36,7 +36,7 @@
 
 ## What's new in 1.1.0
 
-- **Broader iOS support** — verified range now includes iOS 17.0–17.7.x (kernel exploit), iOS 18.0–18.7.1 (kernel exploit), iOS 26.0–26.6.1 and iOS 27 Developer Beta 1–4 / Public Beta 1–2.
+- **Capability-based compatibility** — iOS 16+ can use the UI, secure server API and `.3105` parser. Device-level access is enabled only when the compiled backend supports the exact candidate and its local probe succeeds.
 - **Wrong-password feedback** — importing a `.3105` patch with an incorrect password now shows "Incorrect password" instead of failing silently.
 - **Onboarding for reinstalls** — onboarding reappears after overwriting the app with the same version, so fresh and overwritten installs both see the guided setup.
 
@@ -57,6 +57,7 @@ See the complete [Patch workspace guide](docs/PATCH_GUIDE.md).
 - **App Data Browser** — resolves volatile container UUIDs to stable app bundle identifiers and exposes a native file workspace.
 - **File operations** — search, preview, share, import multiple files, copy, move, paste, rename, delete, create files and folders, make ZIP archives, and safely handle name conflicts.
 - **Portable `.3105` patches** — bundle-based rules survive container-ID changes between devices; projects may include files or folders, support optional password protection, and can be imported from Files or a secure website link.
+- **API interception guard** — checks effective HTTP/HTTPS/SOCKS/PAC proxy settings and active packet-tunnel interfaces before authentication or patch download; detection blocks the app behind a five-second warning and then closes it.
 - **Limited Cleaner** — scans only each app's `Library/Caches` and `tmp`, sorts recoverable size in either direction, supports bulk selection, and requires confirmation before deletion.
 - **Wallpaper Lab** — imports `.tendies` packages, validates payloads, journals installed items, and resets only content installed by 3105.
 - **No jailbreak installation** — 3105 does not install a persistent jailbreak, bootstrap, or daemon and does not inject code into third-party apps. Because it still uses device exploits and can modify app data, no universal guarantee can be made against every app's integrity or jailbreak-detection policy.
@@ -64,19 +65,23 @@ See the complete [Patch workspace guide](docs/PATCH_GUIDE.md).
 
 ## Compatibility
 
-3105 enables device-level features only for builds explicitly verified by the project:
+Build/UI/package compatibility and device-level capability are intentionally
+separate. The current compiled offsets gate is iOS 17.0 through 26.0.x; it has
+no iOS 16 or iOS 27 backend. A version inside that gate is still only a
+candidate until its local capability probe succeeds.
 
-| System | Verified range/builds |
-| --- | --- |
-| iOS 17 | 17.0 through 17.7 (kernel exploit) |
-| iOS 18 | 18.0 through 18.7.1 (kernel exploit) |
-| iOS 26 | 26.0 through 26.6.1 |
-| iOS 27 Developer Beta 1 | `24A5355q` |
-| iOS 27 Developer Beta 2 | `24A5370h` |
-| iOS 27 Developer Beta 3 / Public Beta 1 | `24A5380h` |
-| iOS 27 Developer Beta 4 / Public Beta 2 | `24A5390f` |
+| System | UI/API/parser | Compiled system-access status |
+| --- | --- | --- |
+| iOS 16.7.5 | Supported | unavailable; no offsets/provider |
+| iOS 17.0–17.7.x | Supported | candidate; local probe required |
+| iOS 18.0–18.7.1 | Supported | candidate; local probe required |
+| iOS 26.0.x | Supported | candidate; local probe required |
+| iOS 26.1+ / iOS 27 | Supported | unavailable in the compiled offsets backend |
 
-Unlisted iOS 27 builds are marked unsupported rather than assumed compatible. The iOS 17–18 kernel exploit is opt-in (manual button) because a failed exploit attempt may restart the app.
+Unknown builds fail closed for privileged features. The kernel/system-access
+operation is never run merely because the app opened. See
+[`docs/IOS_16_7_5_COMPATIBILITY.md`](docs/IOS_16_7_5_COMPATIBILITY.md) for the
+repository audit and test matrix.
 
 ## Installation notes
 

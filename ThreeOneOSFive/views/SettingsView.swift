@@ -733,7 +733,7 @@ final class AppearanceSettings: ObservableObject {
             "https://www.image2url.com/r2/default/videos/1787889025768-ac5ecf62-46b4-4ef7-9e78-6811fb049295.mov"
 
         static let animeDynamicVideoURL =
-            "https://www.image2url.com/r2/default/videos/1787889114375-161a0765-b87e-4203-95ea-0b9bc5476c84.mp4"
+            "https://www.image2url.com/r2/default/videos/1790246382665-9e8247a7-dd2b-41fa-afad-a5dd641ac392.mov"
 
         static let lightSkyVideoURL =
             "https://www.image2url.com/r2/default/videos/1789268487742-fe0d586d-4bee-459a-8574-574ffabe4d2d.mp4"

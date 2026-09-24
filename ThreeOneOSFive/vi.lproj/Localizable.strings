@@ -57,14 +57,14 @@
 "dashboard.device_name" = "Tên thiết bị";
 "dashboard.hardware_model" = "Model phần cứng";
 "dashboard.access_footer" = "App chỉ báo thành công sau khi tệp hệ thống thực sự mở được ở chế độ đọc và ghi.";
-"dashboard.unsupported_footer" = "iOS %@ (%@) nằm ngoài phạm vi đã xác minh. Hỗ trợ: iOS 17.0–17.7.x, iOS 18.0–18.7.1, iOS 26.0–26.6.1, iOS 27.0 Developer Beta 1–4 và Public Beta 1–2.";
+"dashboard.unsupported_footer" = "iOS %@ (%@): UI, API và bộ đọc .3105 vẫn hoạt động. System access chưa có provider đã xác minh cho build này.";
 "dashboard.app_browser" = "Duyệt dữ liệu ứng dụng";
 "dashboard.browser" = "Trình duyệt file";
 "dashboard.open_browser" = "Mở trình duyệt file";
 "dashboard.browser_footer" = "Duyệt và đọc dữ liệu từ mọi ứng dụng và system container trên thiết bị.";
 "dashboard.device_actions_warning" = "Hãy lưu thay đổi trước khi khởi động lại thiết bị.";
 "dashboard.unsupported_device" = "Thiết bị không được hỗ trợ";
-"dashboard.unsupported_message" = "iOS %@ chưa được hỗ trợ.\n\nCác phiên bản hiện được hỗ trợ:\n• iOS 17.0–17.7.x\n• iOS 18.0–18.7.1\n• iOS 26.0–26.6.1\n• iOS 27.0 Developer Beta 1–4\n• iOS 27.0 Public Beta 1–2";
+"dashboard.unsupported_message" = "iOS %@ vẫn dùng được UI, API bảo mật và bộ đọc .3105. Truy cập container đặc quyền và áp dụng patch bị tắt vì build này chưa có provider cục bộ đã xác minh.";
 "dashboard.installation" = "Cài đặt ứng dụng";
 "dashboard.kernel_status" = "Trạng thái kernel";
 "dashboard.kernel_running" = "Đang kích hoạt…";
@@ -229,7 +229,7 @@
 "settings.beta_build" = "Beta %lld · %@";
 "settings.developer_beta_build" = "Developer Beta %lld · %@";
 "settings.developer_public_beta_build" = "Developer Beta %lld / Public Beta %lld · %@";
-"settings.supported_range_summary" = "Đã xác minh: iOS 17.0–17.7.x, iOS 18.0–18.7.1, iOS 26.0–26.6.1, iOS 27.0 Developer Beta 1–4 và Public Beta 1–2.";
+"settings.supported_range_summary" = "UI/API/parser: iOS 16+. System access: chỉ candidate có backend đã compile và vượt qua capability probe cục bộ.";
 
 "kernel.section_title" = "Kernel Exploit";
 "kernel.run_exploit" = "Chạy Kernel Exploit";

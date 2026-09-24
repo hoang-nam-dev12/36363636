@@ -57,14 +57,14 @@
 "dashboard.device_name" = "设备名称";
 "dashboard.hardware_model" = "硬件型号";
 "dashboard.access_footer" = "只有成功以读写模式打开系统文件后，才会报告权限获取成功。";
-"dashboard.unsupported_footer" = "iOS %@（%@）不在已验证范围内。支持：iOS 17.0–17.7.x、iOS 18.0–18.7.1、iOS 26.0–26.6.1、iOS 27.0 开发者 Beta 1–4 和公开 Beta 1–2。";
+"dashboard.unsupported_footer" = "iOS %@（%@）：UI、API 与 .3105 解析仍可使用；此构建没有已验证的系统访问提供程序。";
 "dashboard.app_browser" = "应用数据浏览器";
 "dashboard.browser" = "文件浏览器";
 "dashboard.open_browser" = "打开文件浏览器";
 "dashboard.browser_footer" = "浏览并读取此设备上所有应用和系统容器中的数据。";
 "dashboard.device_actions_warning" = "重新启动设备前，请先保存尚未应用的更改。";
 "dashboard.unsupported_device" = "不支持的设备";
-"dashboard.unsupported_message" = "暂不支持 iOS %@。\n\n当前支持：\n• iOS 17.0–17.7.x\n• iOS 18.0–18.7.1\n• iOS 26.0–26.6.1\n• iOS 27.0 开发者 Beta 1–4\n• iOS 27.0 公开 Beta 1–2";
+"dashboard.unsupported_message" = "iOS %@ 仍可使用 UI、安全 API 与 .3105 解析。由于此构建没有已验证的本地提供程序，特权容器访问和补丁应用已禁用。";
 "dashboard.installation" = "应用安装";
 "dashboard.kernel_status" = "内核状态";
 "dashboard.kernel_running" = "正在激活…";
@@ -229,7 +229,7 @@
 "settings.beta_build" = "Beta %lld · %@";
 "settings.developer_beta_build" = "开发者 Beta %lld · %@";
 "settings.developer_public_beta_build" = "开发者 Beta %lld / 公开 Beta %lld · %@";
-"settings.supported_range_summary" = "已验证：iOS 17.0–17.7.x、iOS 18.0–18.7.1、iOS 26.0–26.6.1、iOS 27.0 开发者 Beta 1–4 和公开 Beta 1–2。";
+"settings.supported_range_summary" = "UI/API/解析器：iOS 16+。系统访问：仅限已编译候选，并须通过本地能力探测。";
 
 "kernel.section_title" = "内核漏洞利用";
 "kernel.run_exploit" = "运行内核漏洞利用";

@@ -7,10 +7,10 @@ import AVFoundation
 import AppKit
 #endif
 
-// MARK: - 1. Server License Auth Manager
-// Endpoint is configured by ServerLicenseCheckURL in Info.plist.
-// Response: { valid, expires_at, app_name, lifetime, note, message }
+// MARK: - 1. Secure Server License Auth Manager
+@MainActor
 class KeyAuthManager: ObservableObject {
+    static let shared = KeyAuthManager()
     // ── Persistent storage ──
     @AppStorage("saved_key")      var savedKey:     String = ""
     @AppStorage("key_name")       var keyName:      String = ""
@@ -31,95 +31,30 @@ class KeyAuthManager: ObservableObject {
 
     // Verification is cancellable so logging out cannot be followed by a stale
     // network response that re-authorizes the UI or races the key-login screen.
-    private var verificationTask: URLSessionDataTask?
-    private var verificationSession: URLSession?
+    private var verificationTask: Task<Void, Never>?
     private var verificationGeneration: UInt64 = 0
 
-    private struct LicenseCheckResponse: Decodable {
-        let valid: Bool
-        let expiresAt: String?
-        let appName: String?
-        let lifetime: Bool?
-        let note: String?
-        let message: String?
-
-        enum CodingKeys: String, CodingKey {
-            case valid
-            case expiresAt = "expires_at"
-            case appName = "app_name"
-            case lifetime
-            case note
-            case message
-        }
-    }
-
-    private static var endpoint: URL? {
-        guard let raw = Bundle.main.object(forInfoDictionaryKey: "ServerLicenseCheckURL") as? String else {
-            return nil
-        }
-        return URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines))
-    }
-
-    private static var deviceUDID: String {
-        let storageKey = "server_license_device_udid"
-        if let existing = UserDefaults.standard.string(forKey: storageKey), !existing.isEmpty {
-            return existing
-        }
-        let identifier = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
-        UserDefaults.standard.set(identifier, forKey: storageKey)
-        return identifier
-    }
-
-    // ── Format date string — mirrors fmtDate() in HTML ──
-    private static func parseDate(_ raw: String?) -> Date? {
-        guard let raw, !raw.isEmpty else { return nil }
-        let normalized = raw.replacingOccurrences(of: " ", with: "T")
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withDashSeparatorInDate,
-                             .withColonSeparatorInTime, .withFullDate]
-        if let date = iso.date(from: normalized) { return date }
-
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        for format in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss",
-                       "yyyy-MM-dd HH:mm", "yyyy-MM-dd'T'HH:mm"] {
-            formatter.dateFormat = format
-            if let date = formatter.date(from: raw) { return date }
-        }
-        return nil
-    }
-
-    private static func formatDate(_ raw: String?) -> String {
-        guard let raw, !raw.isEmpty else { return "Không giới hạn" }
-        // Try ISO-style: "2026-12-31 23:59:59" or "2026-12-31T23:59:59"
-        let normalized = raw.replacingOccurrences(of: " ", with: "T")
-        let fmt = ISO8601DateFormatter()
-        fmt.formatOptions = [.withInternetDateTime, .withDashSeparatorInDate,
-                             .withColonSeparatorInTime, .withFullDate]
-        let parsed = fmt.date(from: normalized)
-            ?? {
-                let f2 = DateFormatter()
-                f2.locale = Locale(identifier: "en_US_POSIX")
-                f2.timeZone = TimeZone(secondsFromGMT: 0)
-                f2.dateFormat = "yyyy-MM-dd HH:mm:ss"
-                return f2.date(from: raw)
-            }()
-        guard let d = parsed else { return raw }
+    private static func formatDate(_ date: Date) -> String {
         let out = DateFormatter()
-        out.locale     = Locale(identifier: "vi_VN")
+        out.locale = Locale(identifier: "vi_VN")
         out.dateFormat = "HH:mm - dd/MM/yyyy"
-        return out.string(from: d)
+        return out.string(from: date)
     }
 
     func verifyKey(inputKey: String? = nil) {
+        guard NetworkInterceptionGuard.shared.evaluate() else {
+            verificationTask?.cancel()
+            verificationTask = nil
+            isAuthenticating = false
+            isAuthorized = false
+            errorMessage = ClientAPIError.networkInterceptionDetected.localizedDescription
+            return
+        }
         verificationGeneration &+= 1
         let generation = verificationGeneration
 
         verificationTask?.cancel()
         verificationTask = nil
-        verificationSession?.invalidateAndCancel()
-        verificationSession = nil
 
         isAuthenticating = true
         errorMessage     = nil
@@ -132,106 +67,53 @@ class KeyAuthManager: ObservableObject {
             isAuthorized = false
             return
         }
-        guard let endpoint = Self.endpoint,
-              var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
-            isAuthenticating = false
-            isAuthorized = false
-            errorMessage = "Ứng dụng chưa cấu hình Server Key API."
-            return
-        }
-
-        components.queryItems = [
-            URLQueryItem(name: "key", value: candidate),
-            URLQueryItem(name: "udid", value: Self.deviceUDID)
-        ]
-        guard let url = components.url else {
-            isAuthenticating = false
-            isAuthorized = false
-            errorMessage = "Không thể tạo yêu cầu kiểm tra key."
-            return
-        }
-
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 15
-        configuration.timeoutIntervalForResource = 20
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        let session = URLSession(configuration: configuration)
-        verificationSession = session
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-
-        verificationTask = session.dataTask(with: request) { [weak self] data, response, error in
-            session.finishTasksAndInvalidate()
-            DispatchQueue.main.async {
-                guard let self, self.verificationGeneration == generation else { return }
+        verificationTask = Task { [weak self] in
+            do {
+                let session = try await AuthenticationService.shared.authenticate(licenseKey: candidate)
+                guard !Task.isCancelled,
+                      let self,
+                      self.verificationGeneration == generation else { return }
                 self.verificationTask = nil
-                self.verificationSession = nil
                 self.isAuthenticating = false
-
-                if let error {
+                let license = session.response.license
+                let expiryDate = license.expiresAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+                guard license.lifetime || expiryDate != nil else {
                     self.isAuthorized = false
-                    self.errorMessage = error.localizedDescription
+                    self.errorMessage = "Server trả về ngày hết hạn không hợp lệ."
                     return
                 }
-                guard let http = response as? HTTPURLResponse,
-                      (200..<300).contains(http.statusCode),
-                      let data else {
-                    self.isAuthorized = false
-                    self.errorMessage = "Server Key không phản hồi hợp lệ."
-                    return
+                self.savedKey = candidate
+                self.keyName = license.appName.isEmpty ? "Duy Mạnh Store VIP" : license.appName
+                self.keyNote = license.note ?? ""
+                self.keyLifetime = license.lifetime
+                self.keyDuration = license.lifetime ? "Vĩnh viễn" : "Có thời hạn"
+                self.keyExpiry = license.lifetime ? "Vĩnh viễn" : Self.formatDate(expiryDate!)
+                self.keyExpiryTimestamp = license.lifetime ? 0 : (expiryDate?.timeIntervalSince1970 ?? 0)
+                self.isAuthorized = true
+                self.isPatchVisible = session.response.features.patches
+                self.errorMessage = nil
+                self.isActivationTransitioning = true
+
+                let duration = AppearanceSettings.shared.animationsEnabled ? 1.15 : 0.05
+                DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+                    self?.isActivationTransitioning = false
                 }
-
-                do {
-                    let result = try JSONDecoder().decode(LicenseCheckResponse.self, from: data)
-                    guard result.valid else {
-                        self.isAuthorized = false
-                        self.errorMessage = result.message ?? "Key không hợp lệ."
-                        return
-                    }
-
-                    let lifetime = result.lifetime ?? (result.expiresAt == nil)
-                    let expiryDate = Self.parseDate(result.expiresAt)
-                    guard lifetime || expiryDate != nil else {
-                        self.isAuthorized = false
-                        self.errorMessage = "Server trả về ngày hết hạn không hợp lệ."
-                        return
-                    }
-
-                    let resolvedAppName = result.appName?
-                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    self.savedKey = candidate
-                    self.keyName = resolvedAppName.isEmpty ? "Duy Mạnh Store VIP" : resolvedAppName
-                    self.keyNote = result.note ?? ""
-                    self.keyLifetime = lifetime
-                    self.keyDuration = lifetime ? "Vĩnh viễn" : "Có thời hạn"
-                    self.keyExpiry = lifetime ? "Vĩnh viễn" : Self.formatDate(result.expiresAt)
-                    self.keyExpiryTimestamp = lifetime ? 0 : (expiryDate?.timeIntervalSince1970 ?? 0)
-                    self.isAuthorized = true
-                    self.isPatchVisible = true
-                    self.errorMessage = nil
-                    self.isActivationTransitioning = true
-
-                    let duration = AppearanceSettings.shared.animationsEnabled ? 1.15 : 0.05
-                    DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
-                        self?.isActivationTransitioning = false
-                    }
-                } catch {
-                    self.isAuthorized = false
-                    self.errorMessage = "Phản hồi Server Key không đúng định dạng."
-                }
+            } catch {
+                guard !Task.isCancelled,
+                      let self,
+                      self.verificationGeneration == generation else { return }
+                self.verificationTask = nil
+                self.isAuthenticating = false
+                self.isAuthorized = false
+                self.errorMessage = error.localizedDescription
             }
         }
-        verificationTask?.resume()
     }
 
     func enterMaintenanceMode() {
         verificationGeneration &+= 1
         verificationTask?.cancel()
         verificationTask = nil
-        verificationSession?.invalidateAndCancel()
-        verificationSession = nil
         isMaintenanceMode = true
         isAuthorized = true
         isAuthenticating = false
@@ -255,8 +137,7 @@ class KeyAuthManager: ObservableObject {
         verificationGeneration &+= 1
         verificationTask?.cancel()
         verificationTask = nil
-        verificationSession?.invalidateAndCancel()
-        verificationSession = nil
+        Task { await AuthenticationService.shared.clearSession() }
 
         ["saved_key","key_name","key_duration","key_expiry","key_note","key_expiry_timestamp"].forEach {
             UserDefaults.standard.removeObject(forKey: $0)
@@ -850,11 +731,18 @@ struct KeyActivationView: View {
 }
 
 // MARK: - Chức Năng AT
+private enum DNSFeaturePolicy {
+    // Temporary kill switch: keeps the implementation available without
+    // exposing the tab or allowing profile/API network activity.
+    static let isEnabled = false
+}
+
 private enum DNSProfileInstaller {
     static let profileURL = URL(string: "https://appfluxcore.site/dns.1053.mobileconfig")!
 
     @MainActor
     static func openProfile() {
+        guard DNSFeaturePolicy.isEnabled else { return }
         UIApplication.shared.open(profileURL, options: [:], completionHandler: nil)
     }
 }
@@ -877,6 +765,11 @@ final class DNSProfileFetcher: ObservableObject {
     private let endpoint = URL(string: "https://appfluxcore.site/api/dns_list.php")!
 
     func refresh() async {
+        guard DNSFeaturePolicy.isEnabled else {
+            items = []
+            isLoading = false
+            return
+        }
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
@@ -1025,10 +918,11 @@ struct ContentView: View {
     @EnvironmentObject private var patchDraftCoordinator: PatchDraftCoordinator
     @EnvironmentObject private var repositoryStore: PackageRepositoryStore
     @EnvironmentObject private var repositoryPatchStore: PatchProjectStore
+    @EnvironmentObject private var networkInterceptionGuard: NetworkInterceptionGuard
     @State private var tabNavigation: AppTabNavigationState
     @AppStorage(FeatureVisibility.cleanerStorageKey)    private var cleanerEnabled    = true
     @AppStorage(FeatureVisibility.wallpapersStorageKey) private var wallpapersEnabled = true
-    @StateObject private var authManager = KeyAuthManager()
+    @StateObject private var authManager = KeyAuthManager.shared
     @ObservedObject private var runtimeConfig = AppRuntimeConfig.shared
     @ObservedObject private var appearance = AppearanceSettings.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -1102,7 +996,12 @@ struct ContentView: View {
         }
         .repositoryStorePresentation(repositoryStore, patchStore: repositoryPatchStore)
         .onAppear {
+            guard networkInterceptionGuard.evaluate() else { return }
             tabNavigation.reconcileSelection(with: featureVisibility)
+            if !DNSFeaturePolicy.isEnabled,
+               tabNavigation.selectedTab == AppSection.at.rawValue {
+                tabNavigation.select(AppSection.home.rawValue)
+            }
             AppTabNavigationStore.save(tabNavigation)
             AutoPatchEngine.shared.configure(store: repositoryPatchStore)
             AutoPatchEngine.shared.trigger()
@@ -1129,6 +1028,7 @@ struct ContentView: View {
                 // Flush the lightweight UI snapshot at lifecycle boundaries.
                 AppTabNavigationStore.save(tabNavigation)
             case .active:
+                guard networkInterceptionGuard.evaluate() else { return }
                 Task { @MainActor in
                     let loaded = await runtimeConfig.refresh()
                     guard loaded else { return }
@@ -1169,7 +1069,8 @@ struct ContentView: View {
         if authManager.isMaintenanceMode {
             return [.home]
         }
-        var s: [AppSection] = [.home, .at, .settings]
+        var s: [AppSection] = [.home, .settings]
+        if DNSFeaturePolicy.isEnabled { s.insert(.at, at: 1) }
         if authManager.isPatchVisible { s.insert(.patches, at: 1) }
         return s
     }
@@ -1771,6 +1672,7 @@ private struct DashboardView: View {
     @ObservedObject private var appearance  = AppearanceSettings.shared
 
     @State private var showDevInfo  = false
+    @State private var showSystemAccessConfirmation = false
     @Binding var cleanerEnabled:    Bool
     @Binding var wallpapersEnabled: Bool
     let wallpapersSupported: Bool
@@ -1865,8 +1767,22 @@ private struct DashboardView: View {
                 Image(systemName: "checkmark.shield").foregroundColor(.yellow).frame(width: 24)
                 Text(language.text("settings.compatibility")).foregroundColor(Color(white: 0.7)).fontWeight(.medium)
                 Spacer()
-                Text(appState.isSupported ? "Thiết Bị Hỗ Trợ" : "Không hỗ trợ")
-                    .foregroundStyle(appState.isSupported ? Color.green : Color.red).fontWeight(.semibold)
+                Text(appState.capabilityStatusText)
+                    .foregroundStyle(appState.isSupported ? Color.green : Color.orange).fontWeight(.semibold)
+            }
+            if appState.kernelExploitApplicable && !appState.exploitStatus.isSuccess {
+                Button {
+                    showSystemAccessConfirmation = true
+                } label: {
+                    HStack {
+                        if appState.kernelExploitRunning { ProgressView().tint(.white) }
+                        Text(appState.kernelExploitRunning ? "Đang khởi tạo quyền thiết bị…" : "Khởi tạo quyền thiết bị")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(appState.kernelExploitRunning)
             }
         }
         .padding(20)
@@ -1877,6 +1793,12 @@ private struct DashboardView: View {
                     cornerRadius: 20,
                     width: max(appearance.cardBorderWidth, 1.0))
         .padding(.horizontal, 20)
+        .alert("Xác nhận khởi tạo quyền thiết bị", isPresented: $showSystemAccessConfirmation) {
+            Button("Hủy", role: .cancel) {}
+            Button("Tiếp tục") { appState.runKernelExploitIfNeeded() }
+        } message: {
+            Text("Thao tác system-level có thể làm ứng dụng thoát hoặc thiết bị khởi động lại nếu exploit thất bại. Chỉ tiếp tục trên thiết bị/build đã được xác minh.")
+        }
     }
 
     private var keyInfoCard: some View {

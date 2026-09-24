@@ -57,14 +57,14 @@
 "dashboard.device_name" = "Device name";
 "dashboard.hardware_model" = "Hardware model";
 "dashboard.access_footer" = "Access is reported as successful only after the system file opens for reading and writing.";
-"dashboard.unsupported_footer" = "iOS %@ (%@) is outside the verified range. Supported: iOS 17.0–17.7.x, iOS 18.0–18.7.1, iOS 26.0–26.6.1, iOS 27.0 Developer Beta 1–4 and Public Beta 1–2.";
+"dashboard.unsupported_footer" = "iOS %@ (%@): UI, API, and .3105 parsing remain available. Privileged system access has no verified provider for this build.";
 "dashboard.app_browser" = "App Data Browser";
 "dashboard.browser" = "File Browser";
 "dashboard.open_browser" = "Open File Browser";
 "dashboard.browser_footer" = "Browse and read data from every app and system container on this device.";
 "dashboard.device_actions_warning" = "Save pending changes before restarting the device.";
 "dashboard.unsupported_device" = "Unsupported Device";
-"dashboard.unsupported_message" = "iOS %@ is not yet supported.\n\nCurrently supported:\n• iOS 17.0–17.7.x\n• iOS 18.0–18.7.1\n• iOS 26.0–26.6.1\n• iOS 27.0 Developer Beta 1–4\n• iOS 27.0 Public Beta 1–2";
+"dashboard.unsupported_message" = "iOS %@ can use the UI, secure API, and .3105 parser. Privileged container access and patch application are disabled because no verified local provider is available for this build.";
 "dashboard.installation" = "Installation";
 "dashboard.kernel_status" = "Kernel status";
 "dashboard.kernel_running" = "Activating…";
@@ -229,7 +229,7 @@
 "settings.beta_build" = "Beta %lld · %@";
 "settings.developer_beta_build" = "Developer Beta %lld · %@";
 "settings.developer_public_beta_build" = "Developer Beta %lld / Public Beta %lld · %@";
-"settings.supported_range_summary" = "Verified: iOS 17.0–17.7.x, iOS 18.0–18.7.1, iOS 26.0–26.6.1, iOS 27.0 Developer Beta 1–4 and Public Beta 1–2.";
+"settings.supported_range_summary" = "UI/API/parser: iOS 16+. System access: exact compiled candidates only, after a successful local capability probe.";
 
 "kernel.section_title" = "Kernel Exploit";
 "kernel.run_exploit" = "Run Kernel Exploit";

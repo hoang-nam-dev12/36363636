@@ -83,6 +83,15 @@
 		3105L204 /* RepositorySourcesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105L104; };
 		3105L205 /* RepositoryPresentationSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105L105; };
 		3105Q200 /* RepositoryIntegrationSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105Q100; };
+		3105R200 /* DeviceEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105R100; };
+		3105R201 /* CompatibilityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105R101; };
+		3105R202 /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105R102; };
+		3105R203 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105R103; };
+		3105R204 /* DeviceIdentityProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105R104; };
+		3105R205 /* AuthenticationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105R105; };
+		3105R206 /* AppLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105R106; };
+		3105R207 /* PatchDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105R107; };
+		3105R208 /* NetworkInterceptionGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105R108; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -180,6 +189,15 @@
 		3105L104 /* RepositorySourcesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositorySourcesView.swift; sourceTree = "<group>"; };
 		3105L105 /* RepositoryPresentationSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryPresentationSupport.swift; sourceTree = "<group>"; };
 		3105Q100 /* RepositoryIntegrationSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryIntegrationSupport.swift; sourceTree = "<group>"; };
+		3105R100 /* DeviceEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceEnvironment.swift; sourceTree = "<group>"; };
+		3105R101 /* CompatibilityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompatibilityManager.swift; sourceTree = "<group>"; };
+		3105R102 /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
+		3105R103 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		3105R104 /* DeviceIdentityProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentityProvider.swift; sourceTree = "<group>"; };
+		3105R105 /* AuthenticationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthenticationService.swift; sourceTree = "<group>"; };
+		3105R106 /* AppLifecycleCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLifecycleCoordinator.swift; sourceTree = "<group>"; };
+		3105R107 /* PatchDownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatchDownloadManager.swift; sourceTree = "<group>"; };
+		3105R108 /* NetworkInterceptionGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkInterceptionGuard.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -314,6 +332,15 @@
 				3105L101 /* PackageRepositoryStore.swift */,
 				3105L105 /* RepositoryPresentationSupport.swift */,
 				3105Q100 /* RepositoryIntegrationSupport.swift */,
+				3105R100 /* DeviceEnvironment.swift */,
+				3105R101 /* CompatibilityManager.swift */,
+				3105R102 /* APIModels.swift */,
+				3105R103 /* APIClient.swift */,
+				3105R104 /* DeviceIdentityProvider.swift */,
+				3105R105 /* AuthenticationService.swift */,
+				3105R106 /* AppLifecycleCoordinator.swift */,
+				3105R107 /* PatchDownloadManager.swift */,
+				3105R108 /* NetworkInterceptionGuard.swift */,
 			);
 			path = helpers;
 			sourceTree = "<group>";
@@ -469,6 +496,15 @@
 				3105L204,
 				3105L205,
 				3105Q200,
+				3105R200,
+				3105R201,
+				3105R202,
+				3105R203,
+				3105R204,
+				3105R205,
+				3105R206,
+				3105R207,
+				3105R208,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

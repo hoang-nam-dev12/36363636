@@ -1,21 +1,14 @@
 import CFNetwork
-import Darwin
 import Foundation
 import SwiftUI
 
 enum NetworkInterceptionDetection: Equatable, Sendable {
     case proxy
-    case vpnTunnel
 
     var title: String { "PHÁT HIỆN CHẶN API" }
 
     var message: String {
-        switch self {
-        case .proxy:
-            return "Thiết bị đang bật HTTP/HTTPS/SOCKS Proxy hoặc cấu hình PAC. Hãy tắt ProxyPin/Proxy rồi mở lại ứng dụng."
-        case .vpnTunnel:
-            return "Thiết bị đang có VPN Packet Tunnel có thể bắt request. Hãy tắt ProxyPin/VPN rồi mở lại ứng dụng."
-        }
+        "Thiết bị đang bật HTTP/HTTPS/SOCKS Proxy hoặc cấu hình PAC. Hãy tắt ứng dụng bắt request rồi mở lại ứng dụng."
     }
 }
 
@@ -28,7 +21,6 @@ enum NetworkInterceptionDetector {
         return nil
 #endif
         if hasConfiguredProxy() { return .proxy }
-        if hasActivePacketTunnel() { return .vpnTunnel }
         return nil
     }
 
@@ -54,29 +46,6 @@ enum NetworkInterceptionDetector {
             if let type = proxy[kCFProxyTypeKey as String] as? String, type != directType {
                 return true
             }
-        }
-        return false
-    }
-
-    private static func hasActivePacketTunnel() -> Bool {
-        var firstAddress: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&firstAddress) == 0, let firstAddress else { return false }
-        defer { freeifaddrs(firstAddress) }
-
-        var cursor: UnsafeMutablePointer<ifaddrs>? = firstAddress
-        while let current = cursor {
-            let interface = current.pointee
-            guard let rawName = interface.ifa_name else {
-                cursor = interface.ifa_next
-                continue
-            }
-            let name = String(cString: rawName)
-            let flags = Int32(interface.ifa_flags)
-            let isActive = (flags & IFF_UP) != 0 && (flags & IFF_RUNNING) != 0
-            if isActive && name.hasPrefix("utun") && interface.ifa_addr != nil {
-                return true
-            }
-            cursor = interface.ifa_next
         }
         return false
     }
@@ -153,7 +122,7 @@ struct NetworkInterceptionBlockView: View {
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white)
 
-                Text(guardState.detection?.message ?? "Hãy tắt Proxy/VPN rồi mở lại ứng dụng.")
+                Text(guardState.detection?.message ?? "Hãy tắt ứng dụng bắt request rồi mở lại ứng dụng.")
                     .font(.system(size: 15, weight: .medium))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white.opacity(0.72))
@@ -180,6 +149,6 @@ struct NetworkInterceptionBlockView: View {
             .padding(24)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Phát hiện Proxy hoặc VPN. Ứng dụng sẽ đóng sau \(guardState.secondsRemaining) giây.")
+        .accessibilityLabel("Phát hiện Proxy. Ứng dụng sẽ đóng sau \(guardState.secondsRemaining) giây.")
     }
 }

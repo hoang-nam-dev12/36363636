@@ -46,7 +46,7 @@ actor DeviceIdentityProvider {
     }
 
     func deviceID() throws -> String {
-        let digest = SHA256.hash(data: loadOrCreateKey().publicKey.x963Representation)
+        let digest = SHA256.hash(data: try loadOrCreateKey().publicKey.x963Representation)
         return "dms-" + Data(digest).map { String(format: "%02x", $0) }.joined()
     }
 

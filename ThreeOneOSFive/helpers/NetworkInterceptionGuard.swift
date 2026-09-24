@@ -38,10 +38,7 @@ enum NetworkInterceptionDetector {
         let settings = settingsDictionary as NSDictionary
         let enableKeys: [CFString] = [
             kCFNetworkProxiesHTTPEnable,
-            kCFNetworkProxiesHTTPSEnable,
-            kCFNetworkProxiesSOCKSEnable,
-            kCFNetworkProxiesProxyAutoConfigEnable,
-            kCFNetworkProxiesProxyAutoDiscoveryEnable
+            kCFNetworkProxiesProxyAutoConfigEnable
         ]
         if enableKeys.contains(where: { (settings[$0 as String] as? NSNumber)?.boolValue == true }) {
             return true
